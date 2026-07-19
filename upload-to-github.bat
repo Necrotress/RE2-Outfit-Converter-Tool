@@ -9,15 +9,13 @@ echo.
 echo This script commits and pushes AS YOU (your Git identity).
 echo Cursor will NOT be added as author or co-author.
 echo.
-echo Run this yourself in a normal terminal / double-click.
-echo Do not ask an AI agent to push for you if you want
-echo Cursor absent from the contributor list.
+echo Run this yourself (double-click or a normal terminal).
 echo.
 
 where git >nul 2>&1
 if errorlevel 1 (
   echo ERROR: git not found on PATH.
-  exit /b 1
+  goto :fail
 )
 
 REM --- Use your existing Git identity without changing git config ---
@@ -26,23 +24,19 @@ for /f "usebackq delims=" %%A in (`git config --get user.email 2^>nul`) do set "
 
 if not defined GIT_NAME (
   echo ERROR: git user.name is not set.
-  echo Set it once for your account, e.g.:
-  echo   git config --global user.name "YourName"
-  exit /b 1
+  echo Example: git config --global user.name "YourName"
+  goto :fail
 )
 if not defined GIT_EMAIL (
   echo ERROR: git user.email is not set.
-  echo Set it once for your account, e.g.:
-  echo   git config --global user.email "you@example.com"
-  exit /b 1
+  echo Example: git config --global user.email "you@example.com"
+  goto :fail
 )
 
-REM Force author + committer for this session only (no Cursor trailer / identity)
 set "GIT_AUTHOR_NAME=%GIT_NAME%"
 set "GIT_AUTHOR_EMAIL=%GIT_EMAIL%"
 set "GIT_COMMITTER_NAME=%GIT_NAME%"
 set "GIT_COMMITTER_EMAIL=%GIT_EMAIL%"
-REM Prevent helpers from injecting Co-authored-by / Cursor trailers
 set "GIT_EDITOR=true"
 set "CURSOR_AGENT="
 set "CURSOR_TRACE_ID="
@@ -55,6 +49,10 @@ if not exist ".git" (
   git init -b main
   if errorlevel 1 (
     git init
+    if errorlevel 1 (
+      echo ERROR: git init failed.
+      goto :fail
+    )
     git branch -M main
   )
 )
@@ -63,52 +61,69 @@ echo Staging source (respects .gitignore)...
 git add -A
 if errorlevel 1 (
   echo ERROR: git add failed.
-  exit /b 1
+  goto :fail
 )
 
+echo.
 git status --short
 echo.
 
-REM Only commit if there is something to commit
-git diff --cached --quiet
-if %errorlevel%==0 (
-  echo No new changes to commit.
+REM Commit only when the index differs from HEAD (or there is no HEAD yet)
+set "NEED_COMMIT=0"
+git rev-parse --verify HEAD >nul 2>&1
+if errorlevel 1 (
+  REM No commits yet — commit if anything is staged
+  git diff --cached --quiet
+  if errorlevel 1 set "NEED_COMMIT=1"
 ) else (
+  git diff --cached --quiet
+  if errorlevel 1 set "NEED_COMMIT=1"
+)
+
+if "!NEED_COMMIT!"=="1" (
   echo Creating commit...
-  REM Plain message only — no Co-authored-by / Made-with Cursor trailers
-  if exist ".git\refs\heads\main" (
-    set "COMMIT_MSG=Update RE2 Outfit Converter source"
-  ) else if exist ".git\refs\heads\master" (
-    set "COMMIT_MSG=Update RE2 Outfit Converter source"
-  ) else (
+  git rev-parse --verify HEAD >nul 2>&1
+  if errorlevel 1 (
     set "COMMIT_MSG=Add RE2 Outfit Converter source"
+  ) else (
+    set "COMMIT_MSG=Update RE2 Outfit Converter source"
   )
   git -c user.name="%GIT_NAME%" -c user.email="%GIT_EMAIL%" commit -m "!COMMIT_MSG!"
   if errorlevel 1 (
     echo ERROR: git commit failed.
-    exit /b 1
+    goto :fail
   )
   echo Commit OK.
+) else (
+  echo No new changes to commit ^(already up to date locally^).
+)
+
+git rev-parse --verify HEAD >nul 2>&1
+if errorlevel 1 (
+  echo ERROR: Nothing was committed. Check .gitignore / that files exist.
+  goto :fail
 )
 
 echo.
-REM Ensure remote
 git remote get-url origin >nul 2>&1
 if errorlevel 1 (
   echo No "origin" remote yet.
   echo.
-  echo Create an empty repo on GitHub first (no README), then paste the URL.
+  echo Create an EMPTY GitHub repo first:
+  echo   - README off, no .gitignore, no license
+  echo Then paste the URL below.
   echo Example: https://github.com/YourUser/RE2-Outfit-Converter.git
   echo.
   set /p "REMOTE_URL=GitHub repo URL: "
   if "!REMOTE_URL!"=="" (
     echo ERROR: No URL provided.
-    exit /b 1
+    goto :fail
   )
   git remote add origin "!REMOTE_URL!"
   if errorlevel 1 (
-    echo ERROR: Could not add remote.
-    exit /b 1
+    echo ERROR: Could not add remote. If origin exists, remove it with:
+    echo   git remote remove origin
+    goto :fail
   )
 ) else (
   echo Remote origin:
@@ -117,20 +132,30 @@ if errorlevel 1 (
 
 echo.
 echo Pushing to origin (main)...
+git branch -M main >nul 2>&1
 git push -u origin main
 if errorlevel 1 (
   echo.
-  echo Push failed. If the remote has commits already, try:
-  echo   git pull --rebase origin main
-  echo   git push -u origin main
+  echo Push failed. Common fixes:
+  echo   1^) Repo on GitHub must be empty ^(no README^)
+  echo   2^) Sign in when Git Credential Manager prompts
+  echo   3^) Or run:  gh auth login
   echo.
-  echo Or create a brand-new empty GitHub repo and re-run this script.
-  exit /b 1
+  goto :fail
 )
 
 echo.
-echo DONE. Repo is on GitHub under your account only.
-echo Contributors should show: %GIT_AUTHOR_NAME%
+echo DONE. Uploaded as: %GIT_AUTHOR_NAME%
 echo.
+goto :done
+
+:fail
+echo.
+echo *** Failed or cancelled. Window will stay open so you can read this. ***
+echo.
+pause
+exit /b 1
+
+:done
 pause
 exit /b 0
