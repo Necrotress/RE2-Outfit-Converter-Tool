@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+*.egg
+.venv/
+venv/
+**/.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# PyInstaller / builds
+build/
+Build/
+dist/
+dist-onefile/
+.pyi_work/
+pyi-work/
+pyi-work-onefile/
+warn-*.txt
+xref-*.html
+*.pkg
+*.spec.bak
+
+# Local / runtime
+Output/
+_tmp_*/
+_backup_*/
+settings.json
+*.lnk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Archives / sample mods (large)
+example/
+Examples/
+*.zip
+*.rar
+*.7z
+
+# Editors / tooling
+.cursor/
+.idea/
+.vscode/
+*.swp
+*~
+
+# Release staging leftovers
+RE2 Outfit Converter - Windows/
+RE2 Outfit Converter - Linux/
+RE2 Outfit Converter - Production/
+_DELETE_ME*/

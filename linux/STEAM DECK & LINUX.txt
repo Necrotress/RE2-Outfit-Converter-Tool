@@ -1,0 +1,75 @@
+================================================================================
+RE2 OUTFIT CONVERTER — LINUX / STEAM DECK
+================================================================================
+
+Command-line converter for Resident Evil 2 Remake Claire outfit mods
+(same engine as the Windows GUI app). The Windows .exe is a separate download.
+
+
+--------------------------------------------------------------------------------
+EASIEST WAY (MENU)
+--------------------------------------------------------------------------------
+
+  1. Steam Deck: switch to Desktop Mode. Linux: open a terminal.
+  2. Extract this Linux package somewhere easy.
+  3. Run the menu:
+
+        chmod +x "RUN ON LINUX OR STEAM DECK.sh"
+        ./"RUN ON LINUX OR STEAM DECK.sh"
+
+     (On some desktops you can double-click the .sh and choose "Run in
+     Terminal".)
+
+  4. Menu options:
+        1) List outfit keys
+        2) Analyze a mod
+        3) Convert a mod   (guided)
+        4) Advanced command
+        5) Quit
+
+  First run creates a local .venv (needs internet once). Prefer .zip mods.
+  Put the output .zip into Fluffy's RE2R Mods folder — do NOT extract it.
+
+
+--------------------------------------------------------------------------------
+REQUIREMENTS
+--------------------------------------------------------------------------------
+
+  - Python 3.10+ with venv (usually already on Steam Deck / Linux)
+
+        sudo apt install python3 python3-venv python3-pip   # Debian/Ubuntu
+        sudo pacman -S python python-pip                    # Arch / SteamOS
+
+  - Prefer .zip inputs. For .rar / .7z install p7zip (`7z` on PATH):
+
+        sudo apt install p7zip-full     # Debian/Ubuntu
+        sudo pacman -S p7zip            # Arch / SteamOS
+
+
+--------------------------------------------------------------------------------
+MANUAL COMMANDS (OPTIONAL)
+--------------------------------------------------------------------------------
+
+        chmod +x setup.sh convert.sh
+        ./setup.sh
+        ./convert.sh list-outfits
+        ./convert.sh analyze ./MyMod.zip
+        ./convert.sh convert ./MyMod.zip --from elza --to noir -o ./out
+
+  Useful flags:
+        --name "Display Name"
+        --folder
+        --no-tag
+        --batch-name NAME
+
+  Outfit keys: jacket, tanktop, classic_jacket, classic_tanktop,
+  noir, military, elza
+
+
+--------------------------------------------------------------------------------
+NOTES
+--------------------------------------------------------------------------------
+
+  - Your original mod is never modified.
+  - setup.sh only needs internet the first time (pip: mmh3 + chardet).
+  - For the Windows drag-and-drop GUI, download the Windows package instead.

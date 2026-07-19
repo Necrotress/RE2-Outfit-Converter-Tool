@@ -1,0 +1,154 @@
+================================================================================
+RE2 REMAKE OUTFIT CONVERTER
+User Guide  ·  v1.0.0
+================================================================================
+
+Convert Claire costume mods between in-game outfit slots for Fluffy Mod Manager
+— e.g. take an Elza Walker mod and retarget it to Noir, Jacket, or Tank Top.
+
+
+--------------------------------------------------------------------------------
+REQUIREMENTS
+--------------------------------------------------------------------------------
+
+  - Windows 10/11
+  - Fluffy Mod Manager with RE2 Remake (RE2R) set up
+  - Optional: 7-Zip — required only for .rar / .7z inputs (.zip works without it)
+
+  Steam Deck / Linux users: download the separate Linux package instead
+  (this Windows build is the .exe GUI only).
+
+
+--------------------------------------------------------------------------------
+QUICK START
+--------------------------------------------------------------------------------
+
+  1. Extract this archive (you should get RE2 Outfit Converter.exe + this guide).
+  2. Run RE2 Outfit Converter.exe
+     (first launch may take a few seconds while it unpacks internally)
+  3. Drop a Claire outfit mod onto the window (folder, .zip, .rar, or .7z)
+     Tip: drop the main mod plus AddonFor options together for one combined zip
+  4. Check the detected outfit, set Convert from → to
+  5. Pick an output folder (defaults to Output next to the exe)
+  6. Click Convert
+  7. Put the new .zip into Fluffy:
+        Games\RE2R\Mods
+     Do NOT extract it.
+
+Keep your original mod. The converter never edits the files you drop in 
+it writes a new zip but that output is heavily reworked (outfit slots,
+meshes, previews, names, isolation IDs, and more). Treat the original as
+your source of truth if you need to convert again, compare, or go back.
+
+
+--------------------------------------------------------------------------------
+WHAT IT DOES
+--------------------------------------------------------------------------------
+
+  - Remaps Claire outfit slots (body / face / hair prefabs and body meshes)
+  - Remaps or clears costume-select preview art for the target outfit
+  - Optionally sets the in-game costume name (where supported)
+  - Isolates shared face / hair so converted mods conflict less in Fluffy
+  - Isolates common shared outfit texture folders used by many CR-AW packs
+  - Hides vanilla Noir hat / Military headband when those slots need it
+  - Strips DLC "contentsholder" scenes that can break or leak costume UI
+  - Tags output zip / modinfo with an outfit label (optional, customizable)
+  - Batch: main mod + AddonFor / face-hair packs → one multi-mod Fluffy zip
+
+
+--------------------------------------------------------------------------------
+SUPPORTED OUTFITS (CLAIRE)
+--------------------------------------------------------------------------------
+
+  Order matches the in-game costume list and the convert menus:
+
+    Outfit                 Convert?
+    ---------------------  --------
+    Jacket (Default)       Yes       ← Remake's normal / starting outfit
+    Tank Top               Yes
+    Classic (Jacket)       Yes
+    Classic (Tank Top)     Yes
+    Noir                   Yes
+    Military               Yes
+    Elza Walker            Yes
+    '98 Classic            Detect only — conversion not supported
+
+
+--------------------------------------------------------------------------------
+IN-GAME OUTFIT NAMES
+--------------------------------------------------------------------------------
+
+  Optional "Set in-game outfit name" writes the name shown in the costume menu.
+
+  Supported targets:
+    Tank Top, Classic Tank Top, Elza, Noir, Military
+
+  Not supported:
+    Jacket (Default), Classic (Jacket)
+
+  Why: those two share the same game name files as Tank Top / Classic Tank Top.
+  Renaming them would fight other mods that change Tank Top names in Fluffy.
+
+
+--------------------------------------------------------------------------------
+STEAM DECK / LINUX
+--------------------------------------------------------------------------------
+
+  Not included in this Windows package. Download:
+
+      RE2 Outfit Converter - Linux
+
+  That package has RUN ON LINUX OR STEAM DECK.sh (menu) and full steps.
+
+
+--------------------------------------------------------------------------------
+SETTINGS
+--------------------------------------------------------------------------------
+
+  Open Settings from the main window.
+
+  Skip conversion confirmation
+      Start Convert immediately without a confirmation popup.
+
+  Skip completion dialog
+      Show "Conversion completed" under the bar instead of a popup.
+
+  Show outfit names / tags in convert menus
+      Control whether menus show names like "Classic (Jacket)" and tags
+      like "[Classic]".
+
+  Add outfit tag to zip name and modinfo
+      e.g. MyMod [Noir].zip — customize the tag text per outfit below.
+
+
+--------------------------------------------------------------------------------
+TIPS (FLUFFY / RE2R)
+--------------------------------------------------------------------------------
+
+  - Jacket (Default) IS Claire's normal first outfit. Converting "to Jacket"
+    replaces that vanilla look while the mod is enabled — that is intended.
+  - Prefer .zip inputs when you can; rar/7z need 7-Zip installed.
+  - If a pack already has several Claire outfit slots, convert only remaps
+    the From outfit you pick. Other slots in that pack can still stay active.
+  - Face/hair isolation reduces Claire conflicts; Fluffy may still warn about
+    Ada packs, weapon motion banks, or shared VFX — that is outside this tool.
+  - Classic targets stash costume previews (they don't take custom select UI
+    reliably). Converting again to a supported slot can restore them.
+  - DLC contentsholder files from Elza-style packs are removed on convert so
+    previews/names don't leak onto the wrong costume (e.g. Elza still showing
+    a Noir-converted preview).
+
+
+--------------------------------------------------------------------------------
+LIMITATIONS
+--------------------------------------------------------------------------------
+
+  - Claire outfit mods only (not a general RE Engine mod converter)
+  - '98 Classic cannot be converted (different mesh layout)
+  - Jacket / Classic Jacket cannot get custom in-game names (shared MSG files)
+  - Tank Top / Classic Tank Top name overrides ship shared game MSG files —
+    only one such name mod should "win" in Fluffy at a time
+  - Does not fix Ada / weapon / VFX overlaps between large mod packs
+  - Very large texture mods take longer (full copy + binary path patching)
+  - Binary path patching only rewrites same-length paths in allowlisted
+    engine file types; skipped renames appear as warnings (see docs)
