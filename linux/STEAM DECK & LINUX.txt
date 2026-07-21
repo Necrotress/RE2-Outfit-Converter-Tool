@@ -1,5 +1,5 @@
 ================================================================================
-RE2 OUTFIT CONVERTER — LINUX / STEAM DECK
+RE2 OUTFIT CONVERTER — LINUX
 ================================================================================
 
 Command-line converter for Resident Evil 2 Remake Claire outfit mods
@@ -10,14 +10,14 @@ Command-line converter for Resident Evil 2 Remake Claire outfit mods
 EASIEST WAY (MENU)
 --------------------------------------------------------------------------------
 
-  1. Steam Deck: switch to Desktop Mode. Linux: open a terminal.
-  2. Extract this Linux package somewhere easy.
+  1. Extract this Linux package somewhere easy.
+  2. Open a terminal in that folder.
   3. Run the menu:
 
-        chmod +x "RUN ON LINUX OR STEAM DECK.sh"
-        ./"RUN ON LINUX OR STEAM DECK.sh"
+        chmod +x run.sh
+        ./run.sh
 
-     (On some desktops you can double-click the .sh and choose "Run in
+     (On some desktops you can double-click run.sh and choose "Run in
      Terminal".)
 
   4. Menu options:
@@ -35,15 +35,15 @@ EASIEST WAY (MENU)
 REQUIREMENTS
 --------------------------------------------------------------------------------
 
-  - Python 3.10+ with venv (usually already on Steam Deck / Linux)
+  - Python 3.10+ with venv
 
         sudo apt install python3 python3-venv python3-pip   # Debian/Ubuntu
-        sudo pacman -S python python-pip                    # Arch / SteamOS
+        sudo pacman -S python python-pip                    # Arch
 
   - Prefer .zip inputs. For .rar / .7z install p7zip (`7z` on PATH):
 
         sudo apt install p7zip-full     # Debian/Ubuntu
-        sudo pacman -S p7zip            # Arch / SteamOS
+        sudo pacman -S p7zip            # Arch
 
 
 --------------------------------------------------------------------------------
