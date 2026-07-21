@@ -11,8 +11,8 @@ Elza Walker and re-target it to Noir or Jacket.
 **Windows** — extract `RE2 Outfit Converter - Windows.zip`, run
 `RE2 Outfit Converter.exe` (single-file build; first launch may be a bit slower).
 
-**Linux / Steam Deck** — extract `RE2 Outfit Converter - Linux.zip`, run
-`./"RUN ON LINUX OR STEAM DECK.sh"` (see that package’s guide).
+**Linux** — extract `RE2 Outfit Converter - Linux.zip`, run
+`./"run.sh"` (see that package’s guide).
 
 Windows GUI steps:
 1. Drop a mod folder or `.zip` / `.rar` / `.7z` onto the window
@@ -32,11 +32,11 @@ python main.py
 
 Requires Python 3.10+.
 
-## CLI (Windows, Linux, Steam Deck)
+## CLI (Windows, Linux)
 
-The Windows `.exe` GUI does **not** run on Steam Deck / Linux. Use the CLI.
+The Windows `.exe` GUI does **not** run on Linux. Use the CLI.
 
-**Linux release zip:** extract and run `RUN ON LINUX OR STEAM DECK.sh`.
+**Linux release zip:** extract and run `run.sh`.
 
 **From source:**
 
