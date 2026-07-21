@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Easy menu for Steam Deck / Linux users (same engine as the Windows app).
+# Menu launcher for the RE2 Outfit Converter CLI.
 # Keep this script next to setup.sh / convert.sh / re2_outfit_converter/.
 set -euo pipefail
 
@@ -13,8 +13,7 @@ if [[ ! -f "$ROOT/convert.sh" ]]; then
 fi
 
 ensure_ready() {
-  chmod +x "$ROOT/setup.sh" "$ROOT/convert.sh" \
-    "$ROOT/RUN ON LINUX OR STEAM DECK.sh" 2>/dev/null || true
+  chmod +x "$ROOT/setup.sh" "$ROOT/convert.sh" "$ROOT/run.sh" 2>/dev/null || true
   if [[ ! -x "$ROOT/.venv/bin/python" ]]; then
     echo
     echo "First run: setting up a local Python environment (needs internet once)..."
@@ -136,7 +135,6 @@ while true; do
   cat <<EOF
 ========================================
  RE2 Outfit Converter
- Steam Deck / Linux
 ========================================
 
   Same conversion engine as the Windows app.
