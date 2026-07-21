@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-time setup for Steam Deck / Linux CLI (creates .venv).
+# One-time setup for Linux CLI (creates .venv).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
