@@ -6,6 +6,20 @@ A Windows GUI tool that converts Resident Evil 2 Remake (Fluffy Mod Manager)
 Claire costume mods from one outfit slot to another — e.g. take a mod made for
 Elza Walker and re-target it to Noir or Jacket.
 
+## Screenshots
+
+<p align="center">
+  <img src="screenshots/icon.png" alt="App icon" width="128">
+</p>
+
+**Main window**
+
+![Main window](screenshots/main.png)
+
+**Settings**
+
+![Settings](screenshots/settings.png)
+
 ## Quick start (release builds)
 
 **Windows** — extract `RE2.Outfit.Converter.v1.0.0.Windows.zip`, run
