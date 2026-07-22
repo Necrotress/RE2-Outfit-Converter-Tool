@@ -8,11 +8,11 @@ Elza Walker and re-target it to Noir or Jacket.
 
 ## Quick start (release builds)
 
-**Windows** — extract `RE2.Outfit.Converter.v1.0.0.Windows.zip `, run
+**Windows** — extract `RE2.Outfit.Converter.v1.0.0.Windows.zip`, run
 `RE2 Outfit Converter.exe` (single-file build; first launch may be a bit slower).
 
-**Linux** — extract `RE2.Outfit.Converter.v1.0.0.Linux.zip `, run
-`./"run.sh"` (see that package’s guide).
+**Linux** — extract `RE2.Outfit.Converter.v1.0.0.Linux.zip`, run `./run.sh`
+(see that package’s guide).
 
 Windows GUI steps:
 1. Drop a mod folder or `.zip` / `.rar` / `.7z` onto the window
@@ -32,11 +32,11 @@ python main.py
 
 Requires Python 3.10+.
 
-## CLI (Windows, Linux)
+## CLI (Windows / Linux)
 
-The Windows `.exe` GUI does **not** run on Linux. Use the CLI.
+The Windows `.exe` GUI is Windows-only. On Linux use the CLI package or run from source.
 
-**Linux release zip:** extract and run `run.sh`.
+**Linux release zip:** extract and run `./run.sh`.
 
 **From source:**
 
@@ -108,9 +108,9 @@ From the project root, run `rebuild.bat`. That installs dependencies, builds wit
 Manual equivalent:
 
 ```
-pip install -r requirements.txt pyinstaller pyinstaller --noconfirm --workpath pyi-work --distpath dist "RE2 Outfit Converter.spec"
+pip install -r requirements.txt pyinstaller
+pyinstaller --noconfirm --workpath pyi-work --distpath dist "RE2 Outfit Converter.spec"
 ```
-
 
 Then copy `dist\RE2 Outfit Converter\` to `Build\RE2 Outfit Converter\`.
 
@@ -122,10 +122,9 @@ the same as `Build\` (case-insensitive collision).
 The Windows release zip uses the onefile build:
 
 ```
-pip install -r requirements.txt pyinstaller python -m PyInstaller --noconfirm --workpath pyi-work-onefile --distpath dist-onefile "RE2 Outfit Converter.onefile.spec"
+pip install -r requirements.txt pyinstaller
+python -m PyInstaller --noconfirm --workpath pyi-work-onefile --distpath dist-onefile "RE2 Outfit Converter.onefile.spec"
 ```
-
-
 
 Output: `dist-onefile\RE2 Outfit Converter.exe`  
 Zip that with `USER GUIDE.txt` for the release package.
