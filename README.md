@@ -8,10 +8,10 @@ Elza Walker and re-target it to Noir or Jacket.
 
 ## Quick start (release builds)
 
-**Windows** — extract `RE2 Outfit Converter - Windows.zip`, run
+**Windows** — extract `RE2.Outfit.Converter.v1.0.0.Windows.zip `, run
 `RE2 Outfit Converter.exe` (single-file build; first launch may be a bit slower).
 
-**Linux** — extract `RE2 Outfit Converter - Linux.zip`, run
+**Linux** — extract `RE2.Outfit.Converter.v1.0.0.Linux.zip `, run
 `./"run.sh"` (see that package’s guide).
 
 Windows GUI steps:
@@ -100,7 +100,7 @@ pytest
 
 ## Build the Windows app
 
-Double-click `Rebuild RE2 Outfit Converter.lnk` (or run `rebuild.bat`). That
+Double-click `rebuild.bat`. That
 installs deps, runs PyInstaller, and syncs `dist\` → `Build\RE2 Outfit Converter\`.
 
 Manual equivalent:
