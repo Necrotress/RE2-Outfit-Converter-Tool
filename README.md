@@ -100,16 +100,32 @@ pytest
 
 ## Build the Windows app
 
-Double-click `rebuild.bat`. That
-installs deps, runs PyInstaller, and syncs `dist\` → `Build\RE2 Outfit Converter\`.
+### Local / folder build
+
+From the project root, run `rebuild.bat`. That installs dependencies, builds with
+`RE2 Outfit Converter.spec`, and copies the app to `Build\RE2 Outfit Converter\`.
 
 Manual equivalent:
 
 ```
-pip install -r requirements.txt pyinstaller
-pyinstaller --noconfirm --workpath pyi-work --distpath dist "RE2 Outfit Converter.spec"
+pip install -r requirements.txt pyinstaller pyinstaller --noconfirm --workpath pyi-work --distpath dist "RE2 Outfit Converter.spec"
 ```
 
-Then copy `dist\RE2 Outfit Converter\` to `Build\RE2 Outfit Converter\` for the
-app shortcut. On Windows, avoid letting PyInstaller use a default `build\` work
-folder named the same as `Build\` (case-insensitive collision).
+
+Then copy `dist\RE2 Outfit Converter\` to `Build\RE2 Outfit Converter\`.
+
+On Windows, avoid letting PyInstaller use a default `build\` work folder named
+the same as `Build\` (case-insensitive collision).
+
+### Release (single-file exe)
+
+The Windows release zip uses the onefile build:
+
+```
+pip install -r requirements.txt pyinstaller python -m PyInstaller --noconfirm --workpath pyi-work-onefile --distpath dist-onefile "RE2 Outfit Converter.onefile.spec"
+```
+
+
+
+Output: `dist-onefile\RE2 Outfit Converter.exe`  
+Zip that with `USER GUIDE.txt` for the release package.
