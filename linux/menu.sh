@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 # Interactive text menu for the RE2 Outfit Converter CLI.
 set -euo pipefail
 

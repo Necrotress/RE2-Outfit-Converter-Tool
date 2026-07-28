@@ -1,4 +1,4 @@
-﻿# RE2 Remake Outfit Converter
+# RE2 Remake Outfit Converter
 
 **Version 1.1.0**
 
