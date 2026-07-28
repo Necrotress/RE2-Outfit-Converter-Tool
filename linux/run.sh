@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 # Launch the RE2 Outfit Converter GUI (same app as Windows).
 set -euo pipefail
 

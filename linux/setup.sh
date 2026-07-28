@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 # One-time setup: creates .venv and installs GUI + CLI dependencies.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
