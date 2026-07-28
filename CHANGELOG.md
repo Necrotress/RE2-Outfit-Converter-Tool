@@ -32,7 +32,6 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 - Costume MSG sync writes all convert targets in one pass so multi-target
   converts keep every `mes_sys_clairecos_*.msg` (no last-wins wipe).
-- Stronger `.gitignore` for builds, archives, local mods, and debug trees.
 - Docs / user guide updated for the 1.1 pipeline.
 
 ### Fixed
