@@ -1,10 +1,10 @@
-# RE2 Remake Outfit Converter
+﻿# RE2 Remake Outfit Converter
 
-**Version 1.0**
+**Version 1.1.0**
 
-A Windows GUI tool that converts Resident Evil 2 Remake (Fluffy Mod Manager)
-Claire costume mods from one outfit slot to another — e.g. take a mod made for
-Elza Walker and re-target it to Noir or Jacket.
+A GUI tool (Windows exe + Linux package) that converts Resident Evil 2 Remake
+(Fluffy Mod Manager) Claire costume mods from one outfit slot to another ΓÇö
+e.g. take a mod made for Elza Walker and re-target it to Noir or Jacket.
 
 ## Screenshots
 
@@ -22,17 +22,19 @@ Elza Walker and re-target it to Noir or Jacket.
 
 ## Quick start (release builds)
 
-**Windows** — extract `RE2.Outfit.Converter.v1.0.0.Windows.zip`, run
+**Windows** ΓÇö extract `RE2.Outfit.Converter.v1.1.0.Windows.zip`, run
 `RE2 Outfit Converter.exe` (single-file build; first launch may be a bit slower).
 
-**Linux** — extract `RE2.Outfit.Converter.v1.0.0.Linux.zip`, run `./run.sh`
-(see that package’s guide).
+**Linux** ΓÇö extract `RE2.Outfit.Converter.v1.1.0.Linux.zip`, run `./run.sh`
+(opens the same GUI; needs Python 3.10+, `python3-tk`, and a desktop session ΓÇö
+see that packageΓÇÖs `README.txt`). Pack from source with `pack-linux.bat`.
 
-Windows GUI steps:
+GUI steps (Windows / Linux):
 1. Drop a mod folder or `.zip` / `.rar` / `.7z` onto the window
-   (`.rar` / `.7z` need [7-Zip](https://www.7-zip.org/) installed).
+   (Windows: `.rar` / `.7z` need [7-Zip](https://www.7-zip.org/);
+   Linux: install `p7zip` so `7z` is on `PATH`).
 2. Confirm source / target outfits, set an output folder, click **Convert**.
-3. Drop the resulting `.zip` into Fluffy’s `Games\RE2R\Mods` folder
+3. Drop the resulting `.zip` into FluffyΓÇÖs `Games\RE2R\Mods` folder
    **without extracting**.
 
 Multi-select a main mod plus its AddonFor options to get one multi-mod `.zip`.
@@ -48,29 +50,37 @@ Requires Python 3.10+.
 
 ## CLI (Windows / Linux)
 
-The Windows `.exe` GUI is Windows-only. On Linux use the CLI package or run from source.
+The Linux release zip launches the **GUI** via `./run.sh`. CLI remains available
+via `./convert.sh` (or `./menu.sh` for a text menu). On Windows, use the `.exe`
+or run from source.
 
-**Linux release zip:** extract and run `./run.sh`.
-
-**From source:**
+**From source (CLI only):**
 
 ```
 pip install -r requirements-cli.txt
 python -m re2_outfit_converter list-outfits
 python -m re2_outfit_converter analyze ./MyMod.zip
 python -m re2_outfit_converter convert ./MyMod.zip --from elza --to noir -o ./out
+python -m re2_outfit_converter convert ./Pack.zip \
+  --map tanktop:noir --delete jacket -o ./out
 ```
 
+**Linux GUI from source / release tree:** `pip install -r requirements-linux.txt`
+then `python main.py` (system Tkinter required).
+
 Options: `--name "Display Name"`, `--folder` (single mod), `--no-tag`,
-`--batch-name NAME` (multi-mod zip). Outfit keys match `list-outfits`
-(`elza`, `noir`, `military`, …). Prefer `.zip` inputs; for `.rar` / `.7z`
-install `p7zip` so `7z` is on `PATH`.
+`--batch-name NAME` (multi-mod zip), `--military-face dirty|clean`
+(any convert target; ignored if the mod already has a face),
+`--map SRC:DST` / `--delete KEY` (multi-slot packs; instead of `--from`/`--to`).
+Outfit keys match `list-outfits` (`elza`, `noir`, `military`, ΓÇª). Prefer `.zip`
+inputs; for `.rar` / `.7z` install `p7zip` so `7z` is on `PATH`.
 
 See also:
 
-- [docs/PIPELINE.md](docs/PIPELINE.md) — conversion stage order
-- [docs/BINARY_PATCHING.md](docs/BINARY_PATCHING.md) — path overlay limits
-- [docs/REVIEW_NOTES.md](docs/REVIEW_NOTES.md) — short review checklist
+- [CHANGELOG.md](CHANGELOG.md) ΓÇö release notes
+- [docs/PIPELINE.md](docs/PIPELINE.md) ΓÇö conversion stage order
+- [docs/BINARY_PATCHING.md](docs/BINARY_PATCHING.md) ΓÇö path overlay limits
+- [docs/REVIEW_NOTES.md](docs/REVIEW_NOTES.md) ΓÇö short review checklist
 
 ## Supported outfits (Claire)
 
@@ -85,8 +95,8 @@ See also:
 | Elza Walker       | costume_c                | pl1004       |
 | '98 Classic       | costume_d                | pl1007       |
 
-Convert menus follow that order (Jacket → Elza). `'98 Classic` is
-detect-only and omitted from convert menus — its mesh layout differs from
+Convert menus follow that order (Jacket ΓåÆ Elza). `'98 Classic` is
+detect-only and omitted from convert menus ΓÇö its mesh layout differs from
 the other Claire outfits.
 
 ## What conversion does
@@ -97,13 +107,17 @@ the other Claire outfits.
 - Isolates common shared outfit texture folders (`Pl2020`,
   `Escape/Character/Textures`) used by many CR-AW packs.
 - Injects a hair redirect when converting into Noir / Military so
-  vanilla hats do not reappear.
+  vanilla hats do not reappear in gameplay, and seeds `pl1075` /
+  `pl1071` with Claire hair meshes so the costume-select 3D preview
+  matches (hat/headband hidden).
+- Strips author figure-gallery scenes so Records viewers do not bleed
+  across DLC outfit slots (vanilla gallery + remapped body mesh).
 - Patches same-length path strings inside engine binaries.
 
 The original mod is never modified.
 
 Fluffy may still warn about **Ada** packs, weapon motion banks, or shared VFX
-files — those are outside Claire outfit isolation.
+files ΓÇö those are outside Claire outfit isolation.
 
 ## Tests
 
@@ -142,3 +156,11 @@ python -m PyInstaller --noconfirm --workpath pyi-work-onefile --distpath dist-on
 
 Output: `dist-onefile\RE2 Outfit Converter.exe`  
 Zip that with `USER GUIDE.txt` for the release package.
+
+## Build the Linux package
+
+From the project root on Windows, run `pack-linux.bat`. That stages the GUI
+scripts, `main.py`, `requirements-linux.txt`, and `re2_outfit_converter/`, then
+writes `RE2 Outfit Converter (Linux).zip` next to this README.
+
+On Linux: extract, `chmod +x run.sh`, `./run.sh`.

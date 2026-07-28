@@ -1,0 +1,88 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+*.egg
+.venv/
+venv/
+**/.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
+*.cover
+.hypothesis/
+
+# PyInstaller / builds
+build/
+Build/
+dist/
+dist-onefile/
+dist-linux/
+.pyi_work/
+pyi-work/
+pyi-work-onefile/
+pyi-work*/
+warn-*.txt
+xref-*.html
+*.pkg
+*.spec.bak
+*.exe
+*.dll
+
+# Local / runtime
+Output/
+_tmp_*/
+_backup_*/
+settings.json
+settings.json.bak
+*.lnk
+.DS_Store
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+
+# Archives / sample mods (large ΓÇö never commit)
+example/
+Examples/
+*.zip
+*.rar
+*.7z
+[RE2R]*
+Mods/
+
+# Env / secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Logs / local dumps (includes embedded convert.log copies if dropped in-tree)
+*.log
+*.tmp
+
+# Editors / tooling
+.cursor/
+.idea/
+.vscode/
+*.swp
+*~
+.agent/
+
+# Local extract / pack / debug junk
+_tools/
+_stars_inspect/
+_inspect*/
+
+# Release staging leftovers
+RE2 Outfit Converter - Windows/
+RE2 Outfit Converter - Linux/
+RE2 Outfit Converter - Production/
+_DELETE_ME*/
+
+# Keep README gallery (explicit ΓÇö screenshots/ is not ignored above)
+# screenshots/*.png are tracked for GitHub README

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 _VENDOR = Path(__file__).resolve().parent / "vendor" / "remsg"
@@ -265,11 +266,22 @@ def _write_costume_sys_name(staging: Path, msg_stem: str, display_name: str) -> 
     return ops
 
 
-def _remove_clairecos_msgs(staging: Path, keep: Path | None = None) -> list[str]:
+def _keep_path_set(keep: Path | Iterable[Path] | None) -> set[Path]:
+    if keep is None:
+        return set()
+    if isinstance(keep, Path):
+        return {keep.resolve()}
+    return {Path(p).resolve() for p in keep}
+
+
+def _remove_clairecos_msgs(
+    staging: Path,
+    keep: Path | Iterable[Path] | None = None,
+) -> list[str]:
     ops: list[str] = []
-    keep_res = keep.resolve() if keep is not None else None
+    keep_res = _keep_path_set(keep)
     for path in _iter_clairecos_msgs(staging):
-        if keep_res is not None and path.resolve() == keep_res:
+        if path.resolve() in keep_res:
             continue
         rel = path.relative_to(staging).as_posix()
         path.unlink(missing_ok=True)
@@ -282,12 +294,17 @@ def apply_outfit_display_name(
     msg_stem: str,
     display_name: str,
     existing_msg_relpaths: list[str] | None = None,
+    *,
+    cleanup: bool = True,
 ) -> list[str]:
-    """Write target costume MSG and remove conflicting clairecos MSG files.
+    """Write target costume MSG and optionally remove conflicting clairecos MSGs.
 
     DLC stems write mes_sys_clairecos_{stem}.msg.14 from a bundled template.
     Tank Top / Classic Tank Top patch bundled mes_sys_costume.msg.14 +
     mes_sys_reward.msg.14 (their own entries).
+
+    Set ``cleanup=False`` when writing several stems in one convert pass, then
+    call ``_remove_clairecos_msgs`` once with the full keep set.
 
     Returns a list of human-readable ops for the conversion report.
     """
@@ -303,7 +320,8 @@ def apply_outfit_display_name(
     kind = ids.get("kind", "clairecos")
     if kind == "costume_sys":
         ops = _write_costume_sys_name(staging, stem, display_name)
-        ops.extend(_remove_clairecos_msgs(staging))
+        if cleanup:
+            ops.extend(_remove_clairecos_msgs(staging))
         return ops
 
     template = _template_path(stem)
@@ -315,7 +333,8 @@ def apply_outfit_display_name(
     dest = staging / MSG_DIR_DLC / dest_name
     write_outfit_name(template, dest, display_name, stem)
     ops = [f"set in-game outfit name -> {dest_name!r}: {display_name!r}"]
-    ops.extend(_remove_clairecos_msgs(staging, keep=dest))
+    if cleanup:
+        ops.extend(_remove_clairecos_msgs(staging, keep=dest))
     return ops
 
 
@@ -374,6 +393,9 @@ def sync_costume_name_files(
     - Target with ``msg_stem`` and no new name: preserve text from an existing
       clairecos MSG onto the target stem (via template rewrite), then remove
       leftovers. If nothing readable remains, strip clairecos and leave vanilla.
+
+    For multi-target converts, use ``sync_costume_names_for_targets`` instead so
+    sibling clairecos files are not deleted between passes.
     """
     name = (display_name or "").strip() or None
     stem = (target.msg_stem or "").lower() or None
@@ -401,5 +423,94 @@ def sync_costume_name_files(
     # Keep shared costume-sys msgs only when target uses them (already written).
     ops = _remove_clairecos_msgs(staging)
     if not keep_sys:
+        ops.extend(_remove_costume_sys_msgs(staging))
+    return ops
+
+
+def sync_costume_names_for_targets(
+    staging: Path,
+    targets: Sequence[object],
+    *,
+    display_name: str | None = None,
+    name_target: object | None = None,
+    display_names: dict[str, str] | None = None,
+) -> list[str]:
+    """Write costume-name MSGs for every convert target in one pass.
+
+    Unlike looping ``sync_costume_name_files``, this keeps all target clairecos
+    files (Noir + Military, etc.) instead of deleting siblings on each call.
+
+    ``display_names`` maps target outfit key → explicit in-game name. When set,
+    those names win per target; other targets fall back to preserved text.
+    """
+    targets = list(targets)
+    if not targets:
+        return []
+
+    names_by_key = {
+        str(k): (v or "").strip()
+        for k, v in (display_names or {}).items()
+        if (v or "").strip()
+    }
+    explicit = (display_name or "").strip() or None
+
+    if (
+        len(targets) == 1
+        and name_target is None
+        and not names_by_key
+    ):
+        return sync_costume_name_files(staging, targets[0], display_name)
+
+    # Capture before any rewrite so secondary targets share the source name.
+    preserved = _preserved_display_name(staging)
+
+    stemmed = [t for t in targets if (getattr(t, "msg_stem", None) or "")]
+    if not stemmed:
+        ops = _remove_clairecos_msgs(staging)
+        ops.extend(_remove_costume_sys_msgs(staging))
+        return ops
+
+    ops: list[str] = []
+    keep_clairecos: list[Path] = []
+    wrote_sys = False
+
+    for t in stemmed:
+        stem = str(t.msg_stem).lower()
+        key = getattr(t, "key", None)
+        use_name: str | None = None
+        if key is not None and key in names_by_key:
+            use_name = names_by_key[key]
+        elif (
+            name_target is not None
+            and key == getattr(name_target, "key", None)
+            and explicit
+        ):
+            use_name = explicit
+        elif (
+            explicit
+            and name_target is None
+            and not names_by_key
+            and t is stemmed[0]
+        ):
+            use_name = explicit
+        else:
+            use_name = preserved
+
+        if not use_name:
+            continue
+
+        ops.extend(
+            apply_outfit_display_name(
+                staging, stem, use_name, cleanup=False)
+        )
+        if stem in _COSTUME_SYS_STEMS:
+            wrote_sys = True
+        else:
+            keep_clairecos.append(
+                staging / MSG_DIR_DLC / f"mes_sys_clairecos_{stem}.msg.14"
+            )
+
+    ops.extend(_remove_clairecos_msgs(staging, keep=keep_clairecos))
+    if not wrote_sys:
         ops.extend(_remove_costume_sys_msgs(staging))
     return ops

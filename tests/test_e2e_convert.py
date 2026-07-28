@@ -47,6 +47,8 @@ def test_e2e_elza_to_noir_full_pipeline(tmp_path: Path):
     assert not (mesh / "pl1070").exists()
     private = [p for p in mesh.iterdir() if p.is_dir() and p.name.lower().startswith("pl18")]
     assert len(private) >= 1
+    # Costume-select preview hide: exclusive Noir hat ID seeded with hair mesh
+    assert list((mesh / "pl1075").glob("pl1075.mesh*"))
 
     assert list(folder.rglob("ui0601_01_07_iam.tex*"))
     assert not list(folder.rglob("ui0601_01_08*"))

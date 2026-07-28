@@ -1,0 +1,5 @@
+# Runtime deps for the Linux GUI package (no pytest).
+customtkinter>=5.2
+tkinterdnd2>=0.4
+mmh3>=4.0.1
+chardet>=5.2.0

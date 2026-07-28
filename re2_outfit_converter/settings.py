@@ -58,13 +58,32 @@ def normalize_settings(data: dict) -> dict:
     settings["menu_show_outfit_tag"] = bool(
         settings.get("menu_show_outfit_tag", True))
     settings["tag_output"] = bool(settings.get("tag_output", True))
+    settings["write_convert_log"] = bool(
+        settings.get("write_convert_log", True))
     if not isinstance(settings.get("outfit_tags"), dict):
         settings["outfit_tags"] = default_outfit_tag_markers()
     return settings
 
 
-def load_settings() -> dict:
+def _settings_candidates() -> list[Path]:
+    """Local + roaming paths, newest readable file first.
+
+    Prefer newer mtime so a writable roaming copy is not shadowed by a stale
+    local ``settings.json`` next to a read-only frozen install.
+    """
+    candidates: list[tuple[float, Path]] = []
     for path in (settings_path(), roaming_settings_path()):
+        try:
+            if path.is_file():
+                candidates.append((path.stat().st_mtime, path))
+        except OSError:
+            continue
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return [path for _, path in candidates]
+
+
+def load_settings() -> dict:
+    for path in _settings_candidates():
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -80,20 +99,25 @@ def load_settings() -> dict:
 
 
 def write_settings(settings: dict) -> bool:
-    """Persist settings to disk. Returns True on success."""
+    """Persist settings to disk. Returns True on success.
+
+    Writes local first when possible; always also tries roaming so a later
+    read-only install can still pick up the newest prefs by mtime.
+    """
     settings = dict(settings)
     settings.pop("skip_same_outfit_popup", None)
     if not isinstance(settings.get("outfit_tags"), dict):
         settings["outfit_tags"] = default_outfit_tag_markers()
     payload = json.dumps(settings, indent=2)
+    wrote = False
     for path in (settings_path(), roaming_settings_path()):
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(payload, encoding="utf-8")
-            return True
+            wrote = True
         except OSError:
             continue
-    return False
+    return wrote
 
 
 def initial_output_dir(settings: dict) -> str:

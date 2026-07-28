@@ -1,6 +1,10 @@
 # Conversion pipeline
 
-`converter.convert` stages a full copy of the mod, then runs focused helpers.
+`converter.convert` / `convert_with_ops` stages a full copy of the mod, then
+runs focused helpers. Multi-outfit packs use a list of `OutfitOp` (convert
+source→target, or delete with `target=None`). Delete strips PFB / body mesh /
+UI / DLC MSG for that slot before convert ops run.
+
 Order matters: later steps (especially binary path patching) depend on
 `rename_map` entries built by earlier renames and isolation.
 
@@ -14,18 +18,21 @@ flowchart TD
   purge[4 Purge leftover source bodies]
   redirect[5 Retarget custom redirect bodies]
   ui[6 Costume-select UI]
+  figStrip[6b Strip author figure gallery]
   stream[7 Streaming / sectionroot sync]
   hairEx[8 Exclusive hair override inject]
   iso[9 Isolate face and hair]
   hairIso[10 Isolated hair redirect PFB]
-  tex[11 Shared outfit texture isolation]
-  msg[12 Costume MSG names]
-  holder[13 Delete DLC contentsholder]
-  patch[14 Binary path patch]
-  modinfo[15 Update modinfo tags]
-  pack[16 Zip or folder output]
-  copy --> pfb --> mesh --> purge --> redirect --> ui --> stream
-  stream --> hairEx --> iso --> hairIso --> tex --> msg --> holder
+  exclMesh[11 Exclusive mesh hide for preview]
+  milFace[12 Default face dirty or clean]
+  tex[13 Shared outfit texture isolation]
+  msg[14 Costume MSG names]
+  holder[15 Delete DLC contentsholder]
+  patch[16 Binary path patch]
+  modinfo[17 Update modinfo tags]
+  pack[18 Zip or folder output]
+  copy --> pfb --> mesh --> purge --> redirect --> ui --> figStrip --> stream
+  stream --> hairEx --> iso --> hairIso --> exclMesh --> milFace --> tex --> msg --> holder
   holder --> patch --> modinfo --> pack
 ```
 
@@ -34,24 +41,35 @@ flowchart TD
 | # | Notify / step | Module | Notes |
 |---|---------------|--------|-------|
 | 1 | Copy to staging | `shutil.copytree` | Original mod never modified |
-| 2 | PFB outfit slots | `prefabs` | Copy primary source PFB onto all target slots |
+| 1b | Strip deletes | `strip_outfit.strip_outfit_slot` | Per delete `OutfitOp` |
+| 2 | PFB outfit slots | `prefabs` | Per convert op |
 | 3 | Body mesh IDs | `meshes.convert_mesh_ids` | Body only; face/hair later |
 | 4 | Purge leftovers | `meshes.purge_source_body_meshes` | When rename skipped (collision) |
 | 5 | Redirect bodies | `meshes.retarget_redirect_bodies` | Nurse / Ghost Witch `pl1008` → target body |
 | 6 | Costume UI | `costume_ui` | Remap `ui0601_01_XX`, or stash for Classic |
+| 6b | Figure gallery | `figure_scenes` | Strip author `figurescene_pl1000_XX` / `figure_pl1000_XX` (ids 10–13). Records viewer uses vanilla scene + remapped body (avoids cross-outfit bleed). Runs on convert and delete-only paths. |
 | 7 | Streaming sync | `meshes.sync_streaming_meshes` | Mirror sectionroot ↔ streaming |
-| 8 | Exclusive hair | `hair_prefabs.ensure_exclusive_hair_override` | Noir/Military hat hide |
+| 8 | Exclusive hair | `hair_prefabs.ensure_exclusive_hair_override` | Noir/Military hair PFB redirect |
 | 9 | Face/hair isolation | `isolation.isolate_claire_face_hair` | Private `pl18xx` + `rename_map` |
 | 10 | Isolated hair PFB | `hair_prefabs.ensure_isolated_hair_redirect` | Inject + alias for patch |
-| 11 | Shared textures | `isolation.isolate_shared_outfit_textures` | CR-AW `Pl2020` / `Textures` |
-| 12 | Costume MSG | `msg_name.sync_costume_name_files` | DLC clairecos or shared sys MSG |
-| 13 | Contentsholder | `contentsholder` | Delete only — never retarget |
-| 14 | Binary patch | `path_patch` | Same-length ASCII + UTF-16LE |
-| 15 | Modinfo | `packaging.update_modinfo` | Tag + screenshot casing |
-| 16 | Package | `packaging.make_zip` / `make_folder` | Fluffy-ready output |
+| 11 | Exclusive mesh hide | `exclusive_meshes.ensure_exclusive_part_mesh_hide` | Seed `pl1075`/`pl1071` for costume preview |
+| 12 | Default face | `military_face.apply_military_face_mode` | Clean `pl1050_04`, dirty/leave, or keep mod face (any target) |
+| 13 | Shared textures | `isolation.isolate_shared_outfit_textures` | CR-AW `Pl2020` / `Textures` |
+| 14 | Costume MSG | `msg_name.sync_costume_names_for_targets` | All convert targets in one pass (keeps sibling clairecos files) |
+| 15 | Contentsholder | `contentsholder` | Delete only — never retarget |
+| 16 | Binary patch | `path_patch` | Same-length ASCII + UTF-16LE (paths + `*_Mat` names) |
+| 16b | Material hashes | `material_hash.patch_mdf_material_hashes` | Murmur3 hashes must match remapped `*_Mat` (rain/wet + body bind) |
+| 17 | Modinfo | `packaging.update_modinfo` | Tag + screenshot casing |
+| 18 | Package | `packaging.make_zip` / `make_folder` | Fluffy-ready output |
 
-Batch mode wraps each item in `convert(..., as_folder=True)` (or
+Batch mode wraps each item in `convert_with_ops(..., as_folder=True)` (or
 `batch.passthrough_folder` on `NothingToConvertError`), then zips the staging root.
+
+Incomplete slots (textures/mdf without `.mesh`) are detected by
+`outfit_health.incomplete_outfits` for GUI warnings and CLI `analyze`.
+Load-set merge (`incomplete_outfits_for_load`) suppresses addon-only
+texture-without-mesh flags when a main package (no AddonFor) already
+supplies that outfit’s body mesh.
 
 ## Interaction notes
 
@@ -59,14 +77,27 @@ Batch mode wraps each item in `convert(..., as_folder=True)` (or
 
 Filesystem renames register engine-relative paths in `rename_map`. Only pairs
 with **equal string length** are applied inside binaries. Hair redirect PFBs
-and isolation aliases must be registered **before** stage 14.
+and isolation aliases must be registered **before** stage 16.
 
-### Hair inject → isolation → aliases → patch
+### Hair inject → isolation → exclusive mesh → military face → aliases → patch
 
-1. Exclusive override may inject a pl1070 hair redirect into Noir/Military slots.
-2. Isolation moves shared/exclusive hair meshes onto `pl18xx`.
-3. Isolated hair redirect injects (if needed) and adds `pl1070` → private aliases.
-4. `patch_binaries` rewrites those aliases inside the injected PFB and other files.
+1. Exclusive override may inject a pl1070 hair redirect into Noir/Military slots
+   (skipped when the source already ships an exclusive hat kit).
+2. Isolation always moves shared face/hair onto `pl18xx`. Exclusive
+   `pl1071`/`pl1075` are kept when converting *into* that same slot; when
+   converting *away*, they move to `pl18xx` (no loose exclusive files left, so
+   Military/Noir stay vanilla). Mesh material names stay on the exclusive ID;
+   a bundled private `.mdf2` is seeded so custom scarf/hat textures bind.
+3. Isolated hair redirect: private mesh+mdf when a private mdf exists; else
+   private mesh + vanilla exclusive `.mdf2`; otherwise private/`pl1070` aliases.
+4. Exclusive mesh hide copies Claire hair (isolated, mod `pl1070`, or bundled
+   template) onto `pl1075` / `pl1071` so the costume-select 3D preview does not
+   show the vanilla hat/headband (gameplay already uses the hair PFB redirect).
+5. Face mode (any convert target): dirty leaves the outfit's normal face;
+   clean seeds default Claire face textures over `pl1050_04`; if the mod
+   already has face data (face PFB or `pl1050_04`), the option is locked.
+6. `patch_binaries` rewrites path/`*_Mat` aliases; `patch_mdf_material_hashes`
+   updates Murmur3 hashes so body + rain/wet still bind after a body-ID retarget.
 
 ### Classic UI stash
 

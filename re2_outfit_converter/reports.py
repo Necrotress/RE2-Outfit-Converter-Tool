@@ -15,6 +15,7 @@ class ConversionReport:
     patch_ops: list[str] = field(default_factory=list)
     removed_ops: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    progress_log: list[str] = field(default_factory=list)
     output_zip: Path | None = None
     output_folder: Path | None = None
 
@@ -31,6 +32,7 @@ class BatchReport:
     items: list[ConversionReport] = field(default_factory=list)
     output_zip: Path | None = None
     warnings: list[str] = field(default_factory=list)
+    progress_log: list[str] = field(default_factory=list)
 
 
 class ConversionError(Exception):

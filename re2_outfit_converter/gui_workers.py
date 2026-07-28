@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Sequence
 
-from .converter import BatchItem, convert, convert_batch
+from .converter import BatchItem, convert, convert_batch, convert_with_ops
+from .outfit_ops import OutfitOp
+from .packaging import input_base_name
 from .reports import ConversionError
 from .session import load_inputs
 
@@ -29,10 +31,27 @@ def convert_loaded(
     bundle_name: str,
     mod_label: Callable,
     progress: Callable[[str], None] | None = None,
+    military_face: str = "clean",
+    ops: Sequence[OutfitOp] | None = None,
+    write_log: bool = True,
+    outfit_display_names: dict[str, str] | None = None,
 ):
     """Run single or batch convert. Raises ConversionError / OSError."""
     if len(loaded) == 1:
         item = loaded[0]
+        if ops is not None:
+            return convert_with_ops(
+                item.analysis, ops, out_path,
+                progress=progress,
+                outfit_display_name=outfit_display_name,
+                tag_output=tag_output,
+                tag_marker=tag_marker,
+                strip_tag_markers=strip_tags,
+                source_name=input_base_name(item.source.original),
+                military_face=military_face,
+                write_log=write_log,
+                outfit_display_names=outfit_display_names,
+            )
         return convert(
             item.analysis, source_outfit, target_outfit, out_path,
             progress=progress,
@@ -40,6 +59,10 @@ def convert_loaded(
             tag_output=tag_output,
             tag_marker=tag_marker,
             strip_tag_markers=strip_tags,
+            source_name=input_base_name(item.source.original),
+            military_face=military_face,
+            write_log=write_log,
+            outfit_display_names=outfit_display_names,
         )
     items = [
         BatchItem(
@@ -56,6 +79,10 @@ def convert_loaded(
         tag_output=tag_output,
         tag_marker=tag_marker,
         strip_tag_markers=strip_tags,
+        military_face=military_face,
+        ops=ops,
+        write_log=write_log,
+        outfit_display_names=outfit_display_names,
     )
 
 
