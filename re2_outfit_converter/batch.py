@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+from collections.abc import Sequence
 from pathlib import Path
 
 from .analyzer import AnalysisResult
+from .convert_log import context_from_analysis, write_convert_log_to_staging
 from .hair_prefabs import ensure_isolated_hair_redirect
 from .isolation import (
     isolate_claire_face_hair,
     isolate_shared_outfit_textures,
     staging_mesh_ids,
 )
+from .outfit_ops import OutfitOp
 from .outfits import CLAIRE_FACE_IDS, CLAIRE_HAIR_MESH_IDS, Outfit
 from .packaging import (
     make_folder,
@@ -20,6 +23,7 @@ from .packaging import (
     update_modinfo,
 )
 from .path_patch import patch_binaries
+from .material_hash import patch_mdf_material_hashes
 from .paths import PARTS_DIR, resolve_ci
 from .reports import ConversionError, ConversionReport
 
@@ -32,6 +36,11 @@ def passthrough_folder(
     tag_output: bool = True,
     tag_marker: str | None = None,
     strip_tag_markers: list[str] | None = None,
+    *,
+    write_log: bool = True,
+    source_name: str | None = None,
+    ops: Sequence[OutfitOp] | None = None,
+    military_face: str = "",
 ) -> ConversionReport:
     """Copy a mod into the batch staging folder without outfit remapping.
 
@@ -57,12 +66,26 @@ def passthrough_folder(
         drop_orphan_part_pfbs(staging, report)
         if rename_map:
             patch_binaries(staging, rename_map, report)
+            patch_mdf_material_hashes(staging, rename_map, report)
         marker = resolve_tag_marker(target, tag_marker)
         modinfo_warn = update_modinfo(
             staging, target, tag_output=tag_output, tag_marker=marker,
             strip_tag_markers=strip_tag_markers)
         if modinfo_warn:
             report.warnings.append(modinfo_warn)
+        if write_log:
+            op_list = list(ops) if ops is not None else []
+            log_ctx = context_from_analysis(
+                analysis, op_list,
+                source_name=source_name,
+                as_folder=True,
+                tag_output=tag_output,
+                tag_marker=marker or "",
+                military_face=military_face,
+                label=source_name or "",
+                package_name="passthrough folder (includes convert.log)",
+            )
+            write_convert_log_to_staging(staging, report, log_ctx)
         report.output_folder = make_folder(
             staging, analysis, target, output_dir, folder_name,
             tag_output=tag_output, tag_marker=marker,
@@ -70,6 +93,8 @@ def passthrough_folder(
     finally:
         staging_tmp.cleanup()
     return report
+
+
 def drop_orphan_part_pfbs(staging: Path, report: ConversionReport) -> None:
     """Remove face/hair PFBs when this package ships no face/hair mesh folders.
 

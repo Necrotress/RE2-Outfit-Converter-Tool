@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .analyzer import AnalysisResult, analyze, find_mod_roots
 from .archive import ExtractError, ModSource
+from .packaging import input_base_name
 
 
 @dataclass
@@ -26,7 +27,7 @@ class LoadResult:
 
 
 def package_label(analysis: AnalysisResult, source: ModSource) -> str:
-    return analysis.modinfo.name or source.original.name
+    return input_base_name(source.original) or analysis.modinfo.name or "mod"
 
 
 def link_orphan_addons(

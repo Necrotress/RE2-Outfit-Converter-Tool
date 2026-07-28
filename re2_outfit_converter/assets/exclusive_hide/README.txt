@@ -1,0 +1,1 @@
+exclusive_hide/pl1070_hair: vanilla Claire shared-hair (pl1070) mesh/mdf/tex\nCopied onto pl1075 (Noir hat) / pl1071 (Military headband) so costume-select\n3D preview does not show exclusive accessories. Gameplay already uses the\nhair redirect PFB; this overrides the exclusive mesh IDs the preview loads.\n

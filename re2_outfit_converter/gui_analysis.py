@@ -4,10 +4,7 @@ from __future__ import annotations
 
 from .analyzer import AnalysisResult
 from .archive import ModSource
-
-
-def mod_label(analysis: AnalysisResult, source: ModSource) -> str:
-    return analysis.modinfo.name or source.original.name
+from .session import package_label as mod_label
 
 
 def format_mod_row(analysis: AnalysisResult, source: ModSource) -> str:

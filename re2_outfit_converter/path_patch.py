@@ -18,6 +18,7 @@ def patch_binaries(staging: Path, rename_map: dict[str, str],
 
     Hot path for large mods: allowlisted extensions only, size-capped reads,
     lower-case once per file, cheap ``find`` before overlays (ASCII + UTF-16LE).
+    UTF-16 lower views are built only when needed.
     """
     patterns: list[tuple[str, str, bytes, bytes]] = []
     length_skips = 0
@@ -64,9 +65,17 @@ def patch_binaries(staging: Path, rename_map: dict[str, str],
             continue
 
         data_l = data.lower()
-        u16_l_view = utf16_ascii_lower(data)
-        if not any(old_l in data_l or u16_l in u16_l_view
-                   for _, _, old_l, u16_l in patterns):
+        u16_l_view: bytes | None = None
+
+        def ensure_u16() -> bytes:
+            nonlocal u16_l_view, data
+            if u16_l_view is None:
+                u16_l_view = utf16_ascii_lower(data)
+            return u16_l_view
+
+        ascii_hit = any(old_l in data_l for _, _, old_l, _ in patterns)
+        if not ascii_hit and not any(
+                u16_l in ensure_u16() for _, _, _, u16_l in patterns):
             continue
 
         total = 0
@@ -75,9 +84,12 @@ def patch_binaries(staging: Path, rename_map: dict[str, str],
                 data, n = patch_ascii_ci(data, data_l, old, new, old_l)
                 if n:
                     total += n
-                    # ASCII overlays don't touch UTF-16 pairs.
                     data_l = data.lower()
-            if u16_l in u16_l_view:
+                    # ASCII overlays don't touch UTF-16 pairs; invalidate only
+                    # if a UTF-16 view was already materialized.
+                    if u16_l_view is not None:
+                        u16_l_view = utf16_ascii_lower(data)
+            if u16_l in ensure_u16():
                 data, n = patch_utf16_ci(data, u16_l_view, old, new, u16_l)
                 if n:
                     total += n
@@ -94,6 +106,7 @@ def patch_binaries(staging: Path, rename_map: dict[str, str],
         report.warnings.append(
             f"Binary path patch: skipped {size_skips} file(s) over size cap.")
 
+
 def utf16_ascii_lower(data: bytes) -> bytes:
     """Lowercase ASCII letters stored as UTF-16LE (byte, 0) pairs."""
     out = bytearray(data)
@@ -106,6 +119,7 @@ def utf16_ascii_lower(data: bytes) -> bytes:
         else:
             i += 1
     return bytes(out)
+
 
 def patch_ascii_ci(
     data: bytes, data_lower: bytes, old: str, new: str, needle: bytes,
@@ -126,6 +140,7 @@ def patch_ascii_ci(
         idx = data_lower.find(needle, start)
     return bytes(out), count
 
+
 def patch_utf16_ci(
     data: bytes, data_u16_lower: bytes, old: str, new: str, needle: bytes,
 ) -> tuple[bytes, int]:
@@ -143,6 +158,7 @@ def patch_utf16_ci(
         start = idx + nlen
         idx = data_u16_lower.find(needle, start)
     return bytes(out), count
+
 
 def overlay(matched: bytes, old: str, new: str, step: int) -> bytes:
     out = bytearray(matched)

@@ -25,6 +25,9 @@ class Outfit:
     msg_stem: str | None = None    # DLC name file: mes_sys_clairecos_{stem}.msg
     # Classic slots don't reliably accept costume-select UI overrides.
     supports_costume_ui: bool = True
+    # Extra figure gallery: figurescene_pl1000_{id} / figure_pl1000_{id}
+    # (Military=10, Noir=11, Elza=12, '98=13). None = base Claire figure only.
+    figure_extra_id: str | None = None
 
     @property
     def all_slots(self) -> tuple[str, ...]:
@@ -34,6 +37,8 @@ class Outfit:
 # ui_id mapping from real mods:
 #   Jacket=00, Tank=02, Classic Jacket=01, Classic Tank=04,
 #   Military=06, Noir=07, Elza=08, '98≈09 (preview only; no custom .msg seen)
+# figure_extra_id: DLC gallery scenes under objectroot/scene/ui/figure/extra/
+#   Military=10, Noir=11, Elza=12, '98=13 (matches shipped figurescene names)
 # msg_stem:
 #   DLC (military/noir/elza/original='98) → mes_other_dlc/mes_sys_clairecos_{stem}.msg
 #   Tank Top / Classic Tank Top → shared mes_sys_costume/reward MSG entries
@@ -56,13 +61,16 @@ CLAIRE_OUTFITS: list[Outfit] = [
            "classic_tanktop", supports_costume_ui=False),
     Outfit("98", "'98 Classic", "'98", "costume_d",
            (), "pl1007", "pl1070", "pl1057", "09", "original",
-           supports_costume_ui=False),
+           supports_costume_ui=False, figure_extra_id="13"),
     Outfit("noir", "Noir", "Noir", "costume_a",
-           (), "pl1005", "pl1075", "pl1050", "07", "noir"),
+           (), "pl1005", "pl1075", "pl1050", "07", "noir",
+           figure_extra_id="11"),
     Outfit("military", "Military", "Military", "costume_b",
-           (), "pl1006", "pl1071", "pl1050", "06", "military"),
+           (), "pl1006", "pl1071", "pl1050", "06", "military",
+           figure_extra_id="10"),
     Outfit("elza", "Elza Walker", "Elza", "costume_c",
-           (), "pl1004", "pl1070", "pl1050", "08", "elza"),
+           (), "pl1004", "pl1070", "pl1050", "08", "elza",
+           figure_extra_id="12"),
 ]
 
 # Outfits offered in From/To menus and outfit-tag settings.

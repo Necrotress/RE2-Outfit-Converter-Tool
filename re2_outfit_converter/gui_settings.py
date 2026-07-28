@@ -43,6 +43,13 @@ def open_settings_dialog(
             wraplength=400, justify="left",
         ).pack(anchor="w", padx=32, pady=(0, 4))
 
+    write_log_var = tk.BooleanVar(
+        value=bool(app.settings.get("write_convert_log", True)))
+    _option(
+        body, "Write convert log", write_log_var,
+        "Embeds convert.log inside the output zip/folder "
+        "(mod name, From→To, files changed, warnings).")
+
     skip_confirm_var = tk.BooleanVar(
         value=bool(app.settings.get("skip_convert_confirm", False)))
     _option(
@@ -112,6 +119,7 @@ def open_settings_dialog(
             var.set(defaults[key])
 
     def _persist_settings_dialog():
+        app.settings["write_convert_log"] = bool(write_log_var.get())
         app.settings["skip_convert_confirm"] = bool(skip_confirm_var.get())
         app.settings["skip_completion_dialog"] = bool(skip_done_var.get())
         app.settings["menu_show_outfit_name"] = bool(show_name_var.get())

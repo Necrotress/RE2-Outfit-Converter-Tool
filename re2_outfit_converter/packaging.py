@@ -43,6 +43,16 @@ def safe_name(name: str) -> str:
     return _UNSAFE_NAME_RE.sub("", name).strip() or "mod"
 
 
+def input_base_name(path: Path) -> str:
+    """Base name of a dropped mod file/folder (archive extension stripped)."""
+    name = path.name
+    lower = name.lower()
+    for ext in (".zip", ".rar", ".7z"):
+        if lower.endswith(ext):
+            return name[: -len(ext)]
+    return name
+
+
 def unique_path(path: Path) -> Path:
     if not path.exists():
         return path
@@ -162,10 +172,15 @@ def output_base_name(
     tag_output: bool = True,
     tag_marker: str | None = None,
     strip_tag_markers: list[str] | None = None,
+    source_name: str | None = None,
 ) -> str:
     if folder_name:
         return safe_name(folder_name)
-    base = analysis.modinfo.name or (analysis.root.name if analysis.root else "mod")
+    base = (
+        (source_name or "").strip()
+        or analysis.modinfo.name
+        or (analysis.root.name if analysis.root else "mod")
+    )
     base = strip_converter_tags(base, strip_tag_markers).strip() or "mod"
     marker = resolve_tag_marker(target, tag_marker)
     if tag_output and marker:
@@ -182,10 +197,12 @@ def make_folder(
     tag_output: bool = True,
     tag_marker: str | None = None,
     strip_tag_markers: list[str] | None = None,
+    source_name: str | None = None,
 ) -> Path:
     safe = output_base_name(
         analysis, target, folder_name, tag_output=tag_output,
-        tag_marker=tag_marker, strip_tag_markers=strip_tag_markers)
+        tag_marker=tag_marker, strip_tag_markers=strip_tag_markers,
+        source_name=source_name)
     dest = unique_path(output_dir / safe)
     # Move staging tree instead of a second full copy (temp cleanup tolerates
     # a vanished directory).
@@ -201,11 +218,12 @@ def make_zip(
     tag_output: bool = True,
     tag_marker: str | None = None,
     strip_tag_markers: list[str] | None = None,
+    source_name: str | None = None,
 ) -> Path:
     """Write a Fluffy-ready single-mod zip (modinfo + natives at archive root)."""
     safe = output_base_name(
         analysis, target, tag_output=tag_output, tag_marker=tag_marker,
-        strip_tag_markers=strip_tag_markers)
+        strip_tag_markers=strip_tag_markers, source_name=source_name)
     zip_path = unique_path(output_dir / f"{safe}.zip")
     zip_directory(staging, zip_path)
     return zip_path

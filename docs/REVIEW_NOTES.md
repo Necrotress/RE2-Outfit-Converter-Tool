@@ -28,10 +28,21 @@ Use this instead of embedding full source dumps. Read live code under
 - [ ] E2E tests in `tests/test_e2e_convert.py` pass
 - [ ] CLI `analyze` / `convert` / `list-outfits` work without CustomTkinter
 - [ ] Skipped path patches surface as warnings (GUI + CLI)
+- [ ] Converted packs have no author `figurescene_pl1000_*` / `figure_pl1000_*`
+      (ids 10–13); Records viewer relies on vanilla scene + remapped body
+- [ ] Multi-target converts keep all target `mes_sys_clairecos_*.msg` files
+      (`sync_costume_names_for_targets`, not last-wins)
 
 ## Known hard edges
 
 - Same-length binary patches only (see BINARY_PATCHING.md)
 - `'98 Classic` is detect-only
-- GUI is Windows-primary; CLI is the Steam Deck / Linux path
+- Author figure gallery scenes are stripped on convert (not retargeted) to
+  prevent cross-outfit model-viewer bleed; gallery shows remapped body via
+  the game's vanilla DLC figure scene
+- Delete-only runs still isolate shared face/hair and remove DLC contentsholders
+  (remaining unticked slots are not fully "untouched" at the shared-asset layer)
+- Linux package runs the same CustomTkinter GUI via `./run.sh` (source + venv);
+  CLI via `./convert.sh` / `./menu.sh`
 - `gui.py` still holds layout/event wiring; settings/workers/analysis are split out
+- Pack Linux zip with `pack-linux.bat`

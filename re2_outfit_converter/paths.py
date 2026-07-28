@@ -57,3 +57,13 @@ def engine_path(rel: str) -> str | None:
     if len(segs) >= 3 and segs[-1].isdigit():
         fname = ".".join(segs[:-1])
     return f"{dirname}/{fname}" if dirname else fname
+
+
+def folder_has_mdf(folder: Path | None) -> bool:
+    """True if ``folder`` contains any ``.mdf2`` file (shallow or nested)."""
+    if folder is None or not folder.is_dir():
+        return False
+    return any(
+        p.is_file() and ".mdf2" in p.name.lower()
+        for p in folder.rglob("*")
+    )

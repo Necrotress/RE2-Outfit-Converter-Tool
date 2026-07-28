@@ -1,6 +1,6 @@
 ================================================================================
 RE2 REMAKE OUTFIT CONVERTER
-User Guide  ·  v1.0.0
+User Guide  ·  v1.1.0
 ================================================================================
 
 Convert Claire costume mods between in-game outfit slots for Fluffy Mod Manager
@@ -15,7 +15,7 @@ REQUIREMENTS
   - Fluffy Mod Manager with RE2 Remake (RE2R) set up
   - Optional: 7-Zip — required only for .rar / .7z inputs (.zip works without it)
 
-  Steam Deck / Linux users: download the separate Linux package instead
+  Linux users: download the separate Linux package instead
   (this Windows build is the .exe GUI only).
 
 
@@ -28,7 +28,9 @@ QUICK START
      (first launch may take a few seconds while it unpacks internally)
   3. Drop a Claire outfit mod onto the window (folder, .zip, .rar, or .7z)
      Tip: drop the main mod plus AddonFor options together for one combined zip
-  4. Check the detected outfit, set Convert from → to
+  4. Check the detected outfit(s): tick every Convert-from slot you want to
+     handle. Click a ticked slot to set its Convert to (or Delete on
+     multi-slot packs). One Convert run applies all ticked slots.
   5. Pick an output folder (defaults to Output next to the exe)
   6. Click Convert
   7. Put the new .zip into Fluffy:
@@ -50,7 +52,10 @@ WHAT IT DOES
   - Optionally sets the in-game costume name (where supported)
   - Isolates shared face / hair so converted mods conflict less in Fluffy
   - Isolates common shared outfit texture folders used by many CR-AW packs
-  - Hides vanilla Noir hat / Military headband when those slots need it
+  - Hides vanilla Noir hat / Military headband in gameplay and costume preview
+  - Optional "Vanilla face textures" on any convert (on = Claire's clean
+    face; off = leave the target outfit's normal face). Locked when the pack
+    already includes face data.
   - Strips DLC "contentsholder" scenes that can break or leak costume UI
   - Tags output zip / modinfo with an outfit label (optional, customizable)
   - Batch: main mod + AddonFor / face-hair packs → one multi-mod Fluffy zip
@@ -91,14 +96,17 @@ IN-GAME OUTFIT NAMES
 
 
 --------------------------------------------------------------------------------
-STEAM DECK / LINUX
+LINUX
 --------------------------------------------------------------------------------
 
   Not included in this Windows package. Download:
 
-      RE2 Outfit Converter - Linux
+      RE2 Outfit Converter (Linux)
 
-  That package has RUN ON LINUX OR STEAM DECK.sh (menu) and full steps.
+  Extract it and run ./run.sh — same GUI as Windows (needs Python 3.10+,
+  python3-tk, and a desktop session). See that package's README.txt.
+
+  CLI without the GUI: ./convert.sh  or  ./menu.sh
 
 
 --------------------------------------------------------------------------------
@@ -106,6 +114,11 @@ SETTINGS
 --------------------------------------------------------------------------------
 
   Open Settings from the main window.
+
+  Write convert log
+      Embeds convert.log inside the output zip/folder (next to modinfo.ini).
+      Records mod name, From→To, files changed, warnings, and stage progress.
+      On by default — turn off if you do not want the log in the package.
 
   Skip conversion confirmation
       Start Convert immediately without a confirmation popup.
@@ -128,8 +141,16 @@ TIPS (FLUFFY / RE2R)
   - Jacket (Default) IS Claire's normal first outfit. Converting "to Jacket"
     replaces that vanilla look while the mod is enabled — that is intended.
   - Prefer .zip inputs when you can; rar/7z need 7-Zip installed.
-  - If a pack already has several Claire outfit slots, convert only remaps
-    the From outfit you pick. Other slots in that pack can still stay active.
+  - Multi-slot packs: tick every Convert-from slot you want in this run.
+    The focused row (▸ marker) is the one whose Convert-to you are editing —
+    click a ticked slot to focus it without unticking. Set in-game name only
+    applies to that row's Convert-to when the target supports names (Noir,
+    Military, Elza, Tank, Classic Tank); Jacket / Classic Jacket cannot be
+    renamed. Each ticked slot keeps its own Convert to. Delete appears only
+    when the mod has more than one outfit — use it to strip a broken slot while
+    converting another (e.g. Delete incomplete Jacket + convert Tank → Elza).
+    Incomplete slots show in red with a hover tip — Delete is usually safest.
+    Unticked slots are left as-is.
   - Face/hair isolation reduces Claire conflicts; Fluffy may still warn about
     Ada packs, weapon motion banks, or shared VFX — that is outside this tool.
   - Classic targets stash costume previews (they don't take custom select UI

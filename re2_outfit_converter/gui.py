@@ -28,13 +28,25 @@ from .gui_analysis import (
     format_mod_row,
     format_multi_characters,
     format_outfit_row,
-    mod_label,
 )
 from .gui_settings import open_settings_dialog
 from .gui_workers import analyze_paths, convert_loaded
-from .outfits import CONVERTIBLE_OUTFITS, is_convertible_outfit
+from .military_face import (
+    FACE_CLEAN,
+    FACE_DIRTY,
+    analysis_has_face_rewrite,
+)
+from .name_ui import (
+    active_convert_name_target,
+    collect_display_names_by_target,
+    from_checkbox_label,
+    other_namable_hint,
+)
+from .outfit_health import incomplete_outfits_for_load
+from .outfit_ops import OutfitOp
+from .outfits import CONVERTIBLE_OUTFITS, Outfit, is_convertible_outfit
 from .reports import ConversionError
-from .session import LoadedPackage, close_loaded
+from .session import LoadedPackage, close_loaded, package_label
 from .settings import (
     app_dir,
     default_output_dir,
@@ -49,6 +61,10 @@ from .settings import (
     tag_marker_for,
     write_settings,
 )
+
+DELETE_ACTION = "Delete 🗑"
+INCOMPLETE_COLOR = "#e74c3c"
+FOCUS_COLOR = "#5dade2"
 
 # Re-export for callers that historically imported these from gui.
 __all__ = ["App", "LoadedMod", "run", "app_dir", "settings_path", "default_output_dir"]
@@ -87,19 +103,22 @@ class App(_Root):
         super().__init__()
 
         self.title(f"RE2 Remake Outfit Converter  v{__version__}")
-        self.minsize(760, 540)
+        self.minsize(820, 700)
         ctk.set_widget_scaling(1.0)
         ctk.set_window_scaling(1.0)
         icon = icon_path()
         if icon is not None:
+            # .ico via iconbitmap is Windows-oriented; ignore failures on Linux.
             try:
                 self.iconbitmap(str(icon))
-            except tk.TclError:
+            except (tk.TclError, OSError):
                 pass
 
         self.loaded: list[LoadedMod] = []
         self.settings = load_settings()
         self._busy = False
+        self._closed = False
+        self._filling_name = False
         self._suggested_outfit_name = ""
         self._name_user_edited = False
         self._settings_win: ctk.CTkToplevel | None = None
@@ -107,9 +126,19 @@ class App(_Root):
         self._resize_after: str | None = None
         self._last_wrap_width = 0
         self._settings_write_warned = False
+        self._incomplete: dict[str, str] = {}
+        self._from_checks: list[dict] = []
+        self._outfit_display_names: dict[str, str] = {}
+        self._outfit_name_edited: dict[str, bool] = {}
+        self._outfit_to_choice: dict[str, str] = {}
+        self._active_source_key: str | None = None
+        self._suppress_from_toggle = False
 
         self._restore_geometry()
         self._build_ui()
+        # Restore persisted face mode (checkbox defaults to clean/True).
+        self.use_default_face_var.set(
+            self.settings.get("military_face", FACE_CLEAN) != FACE_DIRTY)
         if HAS_DND:
             self.drop_target_register(DND_FILES)
             self.dnd_bind("<<Drop>>", self._on_drop)
@@ -120,11 +149,11 @@ class App(_Root):
 
     def _build_ui(self):
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=2)
-        self.grid_rowconfigure(2, weight=1)
+        self.grid_rowconfigure(1, weight=1)
+        self.grid_rowconfigure(2, weight=2)
 
         header = ctk.CTkFrame(self, fg_color="transparent")
-        header.grid(row=0, column=0, sticky="ew", padx=14, pady=(14, 0))
+        header.grid(row=0, column=0, sticky="ew", padx=14, pady=(10, 0))
         header.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(
             header,
@@ -138,35 +167,35 @@ class App(_Root):
         ).grid(row=0, column=1, sticky="e")
 
         top = ctk.CTkFrame(self, corner_radius=12)
-        top.grid(row=1, column=0, sticky="nsew", padx=14, pady=(10, 6))
+        top.grid(row=1, column=0, sticky="nsew", padx=14, pady=(8, 4))
         top.grid_columnconfigure(0, weight=1)
         top.grid_rowconfigure(0, weight=1)
 
         drop_text = ("Drop mod folder(s) or .zip / .rar / .7z archive(s) here"
                      if HAS_DND else "Select a mod folder or archive")
         self.drop_label = ctk.CTkLabel(
-            top, text=drop_text, font=ctk.CTkFont(size=16, weight="bold"),
-            height=56)
-        self.drop_label.grid(row=0, column=0, sticky="nsew", padx=16, pady=(12, 0))
+            top, text=drop_text, font=ctk.CTkFont(size=15, weight="bold"),
+            height=48)
+        self.drop_label.grid(row=0, column=0, sticky="nsew", padx=14, pady=(10, 0))
 
         self.path_label = ctk.CTkLabel(top, text="No mod loaded", text_color=DIM)
-        self.path_label.grid(row=1, column=0, sticky="ew", padx=16)
+        self.path_label.grid(row=1, column=0, sticky="ew", padx=14)
 
         btns = ctk.CTkFrame(top, fg_color="transparent")
-        btns.grid(row=2, column=0, pady=(6, 12))
-        ctk.CTkButton(btns, text="Browse Folder...", width=150,
+        btns.grid(row=2, column=0, pady=(4, 10))
+        ctk.CTkButton(btns, text="Browse Folder...", width=140,
                       command=self._browse_folder).pack(side="left", padx=6)
-        ctk.CTkButton(btns, text="Browse Archive...", width=150,
+        ctk.CTkButton(btns, text="Browse Archive...", width=140,
                       command=self._browse_archive).pack(side="left", padx=6)
 
         mid = ctk.CTkFrame(self, corner_radius=12)
-        mid.grid(row=2, column=0, sticky="nsew", padx=14, pady=6)
+        mid.grid(row=2, column=0, sticky="nsew", padx=14, pady=4)
         mid.grid_columnconfigure(1, weight=1)
-        mid.grid_rowconfigure(6, weight=1)
+        mid.grid_rowconfigure(3, weight=1)
 
         ctk.CTkLabel(mid, text="ANALYSIS", font=ctk.CTkFont(size=12, weight="bold"),
                      text_color=DIM).grid(row=0, column=0, columnspan=2,
-                                          sticky="w", padx=16, pady=(10, 2))
+                                          sticky="w", padx=14, pady=(10, 4))
 
         self.info_rows = {}
         for i, (key, label) in enumerate([
@@ -174,25 +203,83 @@ class App(_Root):
             ("characters", "Characters"),
             ("outfit", "Detected outfit"),
         ], start=1):
-            ctk.CTkLabel(mid, text=label, width=160, anchor="w",
+            ctk.CTkLabel(mid, text=label, width=140, anchor="w",
                          text_color=DIM).grid(row=i, column=0, sticky="nw",
-                                              padx=(16, 4), pady=2)
+                                              padx=(14, 8), pady=2)
             val = ctk.CTkLabel(mid, text="-", anchor="w", justify="left")
-            val.grid(row=i, column=1, sticky="ew", padx=(0, 16), pady=2)
+            val.grid(row=i, column=1, sticky="ew", padx=(0, 14), pady=2)
             self.info_rows[key] = val
 
-        name_row = ctk.CTkFrame(mid, fg_color="transparent")
-        name_row.grid(row=4, column=0, columnspan=2, sticky="ew",
-                      padx=16, pady=(12, 0))
-        name_row.grid_columnconfigure(1, weight=1)
+        out = ctk.CTkFrame(mid, fg_color="transparent")
+        out.grid(row=4, column=0, columnspan=2, sticky="ew", padx=14, pady=(10, 10))
+        out.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(out, text="Output folder", width=140, anchor="w",
+                     text_color=DIM).grid(row=0, column=0, sticky="w")
+        self.out_var = tk.StringVar(value=initial_output_dir(self.settings))
+        self.out_entry = ctk.CTkEntry(out, textvariable=self.out_var)
+        self.out_entry.grid(row=0, column=1, sticky="ew", padx=(8, 6))
+        ctk.CTkButton(out, text="...", width=36,
+                      command=self._browse_output).grid(row=0, column=2)
+
+        bottom = ctk.CTkFrame(self, corner_radius=12)
+        bottom.grid(row=3, column=0, sticky="ew", padx=14, pady=(4, 12))
+        bottom.grid_columnconfigure(0, weight=1)
+
+        conv = ctk.CTkFrame(bottom, fg_color="transparent")
+        conv.grid(row=0, column=0, sticky="ew", padx=14, pady=(12, 4))
+        conv.grid_columnconfigure(0, weight=1)
+
+        self.from_label = ctk.CTkLabel(conv, text="Convert from", anchor="w")
+        self.from_label.grid(row=0, column=0, sticky="w")
+
+        # Sizes to content and wraps; avoids a tall empty scroll area.
+        self.from_checks_frame = ctk.CTkFrame(conv, fg_color="transparent")
+        self.from_checks_frame.grid(row=1, column=0, sticky="ew", pady=(4, 2))
+
+        to_row = ctk.CTkFrame(conv, fg_color="transparent")
+        to_row.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        ctk.CTkLabel(to_row, text="Convert to", anchor="w", width=100).pack(
+            side="left")
+        to_labels = self._to_menu_values()
+        self.to_var = tk.StringVar(value=to_labels[0] if to_labels else "-")
+        self.to_menu = ctk.CTkOptionMenu(
+            to_row, variable=self.to_var,
+            values=to_labels or ["-"], width=260,
+            state="disabled",
+            command=self._on_target_outfit_changed)
+        self.to_menu.pack(side="left", padx=(8, 0))
+
+        opts = ctk.CTkFrame(bottom, fg_color="transparent")
+        opts.grid(row=1, column=0, sticky="ew", padx=14, pady=(6, 4))
+        opts.grid_columnconfigure(1, weight=1)
+
+        self.use_default_face_var = tk.BooleanVar(value=True)
+        self.use_default_face_cb = ctk.CTkCheckBox(
+            opts, text="Vanilla face textures",
+            variable=self.use_default_face_var,
+            state="disabled",
+            command=self._on_military_face_changed)
+        self.use_default_face_cb.grid(row=0, column=0, columnspan=2, sticky="w")
+        self.military_face_hint = ctk.CTkLabel(
+            opts, text="", text_color=DIM, anchor="w",
+            font=ctk.CTkFont(size=11))
+        self.military_face_hint.grid(row=1, column=0, columnspan=2, sticky="w",
+                                     pady=(1, 0))
+        self._bind_tooltip(
+            self.use_default_face_cb,
+            "On = seed Claire's clean/default face textures into the\n"
+            "converted mod (replaces Military's dirty face when that\n"
+            "slot is involved).\n"
+            "Off = leave the target outfit's normal face look.\n"
+            "Ignored if the mod already ships its own face data.")
 
         self.set_name_var = tk.BooleanVar(
             value=bool(self.settings.get("set_outfit_name", False)))
         self.set_name_cb = ctk.CTkCheckBox(
-            name_row, text="Set in-game outfit name",
+            opts, text="Set in-game outfit name",
             variable=self.set_name_var,
             command=self._on_set_name_toggled)
-        self.set_name_cb.grid(row=0, column=0, sticky="w")
+        self.set_name_cb.grid(row=2, column=0, sticky="w", pady=(8, 0))
         self._bind_tooltip(
             self.set_name_cb,
             "Sets the costume-select name shown in-game.\n"
@@ -203,67 +290,30 @@ class App(_Root):
 
         self.outfit_name_var = tk.StringVar(value="")
         self.outfit_name_entry = ctk.CTkEntry(
-            name_row, textvariable=self.outfit_name_var,
+            opts, textvariable=self.outfit_name_var,
             placeholder_text="In-game outfit name")
-        self.outfit_name_entry.grid(row=0, column=1, sticky="ew", padx=(12, 0))
+        self.outfit_name_entry.grid(
+            row=2, column=1, sticky="ew", padx=(10, 0), pady=(8, 0))
         self.outfit_name_var.trace_add("write", self._on_outfit_name_typed)
 
         self.name_hint = ctk.CTkLabel(
-            name_row, text="", text_color=DIM, anchor="w",
+            opts, text="", text_color=DIM, anchor="w",
             font=ctk.CTkFont(size=11))
-        self.name_hint.grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 0))
-
-        out = ctk.CTkFrame(mid, fg_color="transparent")
-        out.grid(row=5, column=0, columnspan=2, sticky="ew", padx=16, pady=(8, 0))
-        out.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(out, text="Output folder", width=160, anchor="w",
-                     text_color=DIM).grid(row=0, column=0, sticky="w")
-        self.out_var = tk.StringVar(value=initial_output_dir(self.settings))
-        self.out_entry = ctk.CTkEntry(out, textvariable=self.out_var)
-        self.out_entry.grid(row=0, column=1, sticky="ew", padx=8)
-        ctk.CTkButton(out, text="...", width=40,
-                      command=self._browse_output).grid(row=0, column=2)
-
-        ctk.CTkFrame(mid, fg_color="transparent", height=1).grid(
-            row=6, column=0, columnspan=2, sticky="nsew", pady=(0, 14))
-
-        bottom = ctk.CTkFrame(self, corner_radius=12)
-        bottom.grid(row=3, column=0, sticky="ew", padx=14, pady=(6, 14))
-        bottom.grid_columnconfigure(0, weight=1)
-
-        conv = ctk.CTkFrame(bottom, fg_color="transparent")
-        conv.grid(row=0, column=0, sticky="ew", padx=16, pady=(14, 8))
-
-        ctk.CTkLabel(conv, text="Convert from").pack(side="left")
-        self.from_var = tk.StringVar(value="-")
-        self.from_menu = ctk.CTkOptionMenu(conv, variable=self.from_var,
-                                           values=["-"], width=200,
-                                           state="disabled")
-        self.from_menu.pack(side="left", padx=8)
-
-        ctk.CTkLabel(conv, text="to").pack(side="left")
-        to_labels = outfit_menu_labels(self.settings)
-        self.to_var = tk.StringVar(value=to_labels[0])
-        self.to_menu = ctk.CTkOptionMenu(
-            conv, variable=self.to_var,
-            values=to_labels, width=260,
-            state="disabled",
-            command=self._on_target_outfit_changed)
-        self.to_menu.pack(side="left", padx=8)
+        self.name_hint.grid(row=3, column=0, columnspan=2, sticky="w", pady=(1, 0))
 
         self.convert_btn = ctk.CTkButton(
-            bottom, text="Convert", height=44, state="disabled",
+            bottom, text="Convert", height=42, state="disabled",
             fg_color=CONVERT, hover_color=CONVERT_HOVER,
             font=ctk.CTkFont(size=15, weight="bold"),
             command=self._start_convert)
-        self.convert_btn.grid(row=1, column=0, sticky="ew", padx=16, pady=(0, 12))
+        self.convert_btn.grid(row=2, column=0, sticky="ew", padx=14, pady=(8, 8))
 
         progress_row = ctk.CTkFrame(bottom, fg_color="transparent")
-        progress_row.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 14))
+        progress_row.grid(row=3, column=0, sticky="ew", padx=14, pady=(0, 12))
         progress_row.grid_columnconfigure(0, weight=1)
 
         self.progress_bar = ctk.CTkProgressBar(
-            progress_row, height=14, corner_radius=7,
+            progress_row, height=12, corner_radius=6,
             progress_color=CONVERT, fg_color="#2a2a2a",
             border_width=0)
         self.progress_bar.grid(row=0, column=0, sticky="ew")
@@ -273,9 +323,9 @@ class App(_Root):
             progress_row, text="", anchor="center",
             font=ctk.CTkFont(size=12),
             text_color=DIM)
-        self.status_label.grid(row=1, column=0, sticky="ew", pady=(6, 0))
+        self.status_label.grid(row=1, column=0, sticky="ew", pady=(4, 0))
 
-        self._sync_name_ui()
+        self._show_idle_convert_ui()
         self.after(50, self._update_wraplengths)
 
     # -------------------------------------------------------------- helpers
@@ -297,7 +347,7 @@ class App(_Root):
                 return
             except tk.TclError:
                 pass
-        self.geometry("920x640")
+        self.geometry("820x780")
 
     def _capture_geometry(self):
         try:
@@ -319,7 +369,24 @@ class App(_Root):
     def _after_resize(self):
         self._resize_after = None
         self._update_wraplengths()
+        self._relayout_from_checks_if_needed()
         self._capture_geometry()
+
+    def _relayout_from_checks_if_needed(self) -> None:
+        if not self._from_checks:
+            return
+        cols = self._from_check_columns()
+        # Count current columns used by existing grid children.
+        used = {
+            int(child.grid_info().get("column", 0))
+            for child in self.from_checks_frame.winfo_children()
+            if child.winfo_manager() == "grid"
+        }
+        current_cols = (max(used) + 1) if used else 0
+        if current_cols == cols:
+            return
+        # Preserve selection while reflowing columns.
+        self._rebuild_from_checks(select_first=False)
 
     def _update_wraplengths(self):
         try:
@@ -339,6 +406,10 @@ class App(_Root):
         self._capture_geometry()
         self.settings["output_dir"] = self.out_var.get()
         self.settings["set_outfit_name"] = bool(self.set_name_var.get())
+        # Preview (no mod) face toggles are cosmetic — don't persist them.
+        if (self.loaded
+                and str(self.use_default_face_cb.cget("state")) != "disabled"):
+            self.settings["military_face"] = self._military_face_choice()
         if not write_settings(self.settings) and not self._settings_write_warned:
             self._settings_write_warned = True
             try:
@@ -401,44 +472,418 @@ class App(_Root):
     def _outfit_from_menu_label(self, label: str):
         return outfit_from_menu_label(self.settings, label)
 
+    def _delete_action_available(self) -> bool:
+        """Delete only makes sense when the pack has more than one outfit slot."""
+        if not self.loaded:
+            return False
+        return len(self._convertible_source_outfits()) > 1
+
+    def _to_menu_values(self) -> list[str]:
+        labels = list(outfit_menu_labels(self.settings))
+        if self._delete_action_available():
+            if DELETE_ACTION not in labels:
+                labels.append(DELETE_ACTION)
+        return labels
+
+    def _sanitize_delete_choices(self) -> None:
+        """Clear stored Delete targets when Delete is not offered."""
+        if self._delete_action_available():
+            return
+        for key, choice in list(self._outfit_to_choice.items()):
+            if not str(choice).startswith("Delete"):
+                continue
+            outfit = next(
+                (o for o in CONVERTIBLE_OUTFITS if o.key == key), None)
+            if outfit is not None:
+                self._outfit_to_choice[key] = self._outfit_menu_label(outfit)
+
     def _refresh_to_menu(self) -> None:
-        labels = outfit_menu_labels(self.settings)
+        self._sanitize_delete_choices()
+        labels = self._to_menu_values()
         if not labels:
             return
-        current = self._target_outfit()
+        current = self.to_var.get()
+        if current.startswith("Delete"):
+            current = DELETE_ACTION
         self.to_menu.configure(values=labels)
-        self.to_var.set(
-            self._outfit_menu_label(current) if current else labels[0])
-
-    def _refresh_from_menu(self) -> None:
-        sources = self._convertible_source_names()
-        if not sources:
-            self.from_menu.configure(values=["-"], state="disabled")
-            self.from_var.set("-")
-            return
-        current = self._outfit_from_menu_label(self.from_var.get())
-        self.from_menu.configure(values=sources, state="normal")
-        if current is not None:
-            label = self._outfit_menu_label(current)
-            self.from_var.set(label if label in sources else sources[0])
+        if current in labels:
+            self.to_var.set(current)
         else:
-            self.from_var.set(sources[0])
+            src = self._selected_source_outfit()
+            if src is not None:
+                self.to_var.set(self._outfit_menu_label(src))
+            else:
+                self.to_var.set(labels[0])
 
     def _refresh_convert_menus(self) -> None:
         self._refresh_to_menu()
         if self.loaded:
-            self._refresh_from_menu()
+            self._rebuild_from_checks(select_first=False)
+
+    def _is_delete_target(self) -> bool:
+        return self.to_var.get().startswith("Delete")
 
     def _target_outfit(self):
+        if self._is_delete_target():
+            return None
         return self._outfit_from_menu_label(self.to_var.get())
 
     def _on_target_outfit_changed(self, _value=None):
+        src = self._selected_source_outfit()
+        if src is not None:
+            self._outfit_to_choice[src.key] = self.to_var.get()
         self._sync_name_ui()
+        self._sync_military_face_ui()
+
+    def _on_military_face_changed(self, _value=None):
+        self._save_settings()
+
+    def _military_face_choice(self) -> str:
+        """Return clean when checked, dirty when unchecked (mod-face lock ignored)."""
+        if self.use_default_face_var.get():
+            return FACE_CLEAN
+        return FACE_DIRTY
+
+    def _loaded_has_face_rewrite(self) -> bool:
+        return any(analysis_has_face_rewrite(m.analysis) for m in self.loaded)
+
+    def _collect_incomplete(self) -> dict[str, str]:
+        return incomplete_outfits_for_load(
+            [m.analysis for m in self.loaded])
+
+    def _convertible_source_outfits(self) -> list[Outfit]:
+        detected: set[str] = set()
+        for m in self.loaded:
+            for o in m.analysis.claire_outfits:
+                if is_convertible_outfit(o):
+                    detected.add(o.key)
+        return [o for o in CONVERTIBLE_OUTFITS if o.key in detected]
+
+    def _from_check_outfits(self) -> list[Outfit]:
+        """Outfits shown as From checkboxes (detected, or all while idle)."""
+        if not self.loaded:
+            return list(CONVERTIBLE_OUTFITS)
+        detected = self._convertible_source_outfits()
+        # Keep the same strip layout even when nothing is convertible.
+        return detected if detected else list(CONVERTIBLE_OUTFITS)
+
+    def _show_idle_convert_ui(self) -> None:
+        """Idle / no-mod convert strip — same layout, clickable, convert locked."""
+        self._incomplete = {}
+        self._outfit_display_names.clear()
+        self._outfit_name_edited.clear()
+        self._outfit_to_choice.clear()
+        self._active_source_key = None
+        self._suggested_outfit_name = ""
+        self._filling_name = True
+        self.outfit_name_var.set("")
+        self._filling_name = False
+        self._name_user_edited = False
+        self._refresh_to_menu()
+        self._rebuild_from_checks(select_first=True)
+
+    def _clear_from_checks(self) -> None:
+        for child in self.from_checks_frame.winfo_children():
+            child.destroy()
+        self._from_checks.clear()
+
+    def _rebuild_from_checks(self, *, select_first: bool = True) -> None:
+        self._incomplete = self._collect_incomplete() if self.loaded else {}
+        self._persist_active_name()
+        if self._active_source_key is not None:
+            self._outfit_to_choice[self._active_source_key] = self.to_var.get()
+        prev_checked = {
+            r["outfit"].key for r in self._from_checks if bool(r["var"].get())
+        }
+        prev_active = self._active_source_key
+        self._clear_from_checks()
+        self._sanitize_delete_choices()
+        outfits = self._from_check_outfits()
+        if not outfits:
+            self._active_source_key = None
+            self.to_menu.configure(state="disabled")
+            self.convert_btn.configure(state="disabled")
+            self._sync_name_ui()
+            self._sync_military_face_ui()
+            return
+
+        outfit_keys = {o.key for o in outfits}
+        if select_first:
+            # Loaded multi-slot packs: tick every detected outfit so Delete +
+            # convert targets can be set per row and run together.
+            if self.loaded:
+                checked_keys = set(outfit_keys)
+            else:
+                checked_keys = {outfits[0].key}
+        else:
+            checked_keys = prev_checked & outfit_keys
+            if not checked_keys:
+                checked_keys = {outfits[0].key}
+
+        if prev_active in checked_keys:
+            pick_key = prev_active
+        else:
+            pick_key = next(
+                (o.key for o in outfits if o.key in checked_keys),
+                outfits[0].key,
+            )
+
+        self._suppress_from_toggle = True
+        # Wrap into columns so checkboxes stay inside the window.
+        cols = self._from_check_columns()
+        for c in range(max(cols, 3)):
+            self.from_checks_frame.grid_columnconfigure(
+                c, weight=1 if c < cols else 0, uniform="from")
+        for i, outfit in enumerate(outfits):
+            r, c = divmod(i, cols)
+            cell = ctk.CTkFrame(self.from_checks_frame, fg_color="transparent")
+            cell.grid(row=r, column=c, sticky="ew", padx=(0, 10), pady=2)
+            var = tk.BooleanVar(value=(outfit.key in checked_keys))
+            reason = self._incomplete.get(outfit.key)
+            label = self._outfit_menu_label(outfit)
+            cb = ctk.CTkCheckBox(
+                cell,
+                text=from_checkbox_label(
+                    outfit,
+                    incomplete=bool(reason),
+                    focused=False,
+                    base_label=label,
+                ),
+                variable=var,
+                command=lambda o=outfit: self._on_from_check_toggled(o),
+            )
+            cb.pack(side="left", anchor="w")
+            if reason:
+                self._bind_tooltip(cb, reason)
+            self._from_checks.append({
+                "outfit": outfit,
+                "var": var,
+                "cb": cb,
+                "base_label": label,
+            })
+            if outfit.key not in self._outfit_display_names:
+                self._outfit_display_names[outfit.key] = (
+                    self._suggested_outfit_name or label)
+            if outfit.key not in self._outfit_to_choice:
+                self._outfit_to_choice[outfit.key] = (
+                    self._outfit_menu_label(outfit))
+        self._suppress_from_toggle = False
+        self._active_source_key = pick_key
+        self._apply_source_selection_ui()
+
+    def _from_check_columns(self) -> int:
+        """How many checkbox columns fit in the current window width."""
+        try:
+            width = int(self.winfo_width())
+        except tk.TclError:
+            width = 0
+        if width < 200:
+            width = 960  # default / pre-map fallback
+        # ~240px per checkbox column (label + padding).
+        return max(1, min(3, (width - 100) // 240))
+
+    def _on_from_check_toggled(self, outfit: Outfit) -> None:
+        if self._suppress_from_toggle:
+            return
+        row = next(
+            (r for r in self._from_checks if r["outfit"].key == outfit.key),
+            None,
+        )
+        if row is None:
+            return
+        checked = bool(row["var"].get())
+        self._persist_active_name()
+        if self._active_source_key is not None:
+            self._outfit_to_choice[self._active_source_key] = self.to_var.get()
+        if checked:
+            # Focus this row's Convert-to settings; keep other ticks.
+            self._active_source_key = outfit.key
+        elif self._active_source_key != outfit.key:
+            # Clicking another already-ticked box toggles it off briefly —
+            # treat that as "edit this slot" and keep it ticked.
+            self._suppress_from_toggle = True
+            row["var"].set(True)
+            self._suppress_from_toggle = False
+            self._active_source_key = outfit.key
+        else:
+            # Untick the focused slot for real.
+            other = next(
+                (r["outfit"].key for r in self._from_checks
+                 if r["outfit"].key != outfit.key and bool(r["var"].get())),
+                None,
+            )
+            self._active_source_key = other
+        self._apply_source_selection_ui()
+
+    def _apply_source_selection_ui(self) -> None:
+        active = self._active_source_key
+        checked = self._checked_source_outfits()
+        if active is not None and not any(
+                o.key == active for o in checked):
+            active = checked[0].key if checked else None
+            self._active_source_key = active
+
+        for row in self._from_checks:
+            row["cb"].configure(state="normal")
+
+        if not checked:
+            self.to_menu.configure(state="disabled")
+            self.convert_btn.configure(state="disabled")
+            self._sync_name_ui()
+            self._sync_military_face_ui()
+            return
+
+        if active is None:
+            self._active_source_key = checked[0].key
+            active = self._active_source_key
+
+        self.to_menu.configure(state="normal")
+        can_convert = bool(
+            self.loaded
+            and not self._busy
+            and self._convertible_source_outfits()
+        )
+        self.convert_btn.configure(
+            state="normal" if can_convert else "disabled")
+        to_choice = self._outfit_to_choice.get(active)
+        if to_choice and to_choice.startswith("Delete"):
+            to_choice = DELETE_ACTION
+        labels = self._to_menu_values()
+        if to_choice in labels:
+            self.to_var.set(to_choice)
+        else:
+            src = self._selected_source_outfit()
+            self.to_var.set(
+                self._outfit_menu_label(src) if src else labels[0])
+            if src is not None:
+                self._outfit_to_choice[src.key] = self.to_var.get()
+        self._refresh_from_focus_labels()
+        self._load_active_name()
+        self._sync_name_ui()
+        self._sync_military_face_ui()
+
+    def _refresh_from_focus_labels(self) -> None:
+        """Show ▸ on the focused From row; keep incomplete color when needed."""
+        active = self._active_source_key
+        for row in self._from_checks:
+            outfit = row["outfit"]
+            reason = self._incomplete.get(outfit.key)
+            focused = outfit.key == active
+            text = from_checkbox_label(
+                outfit,
+                incomplete=bool(reason),
+                focused=focused,
+                base_label=row.get("base_label") or self._outfit_menu_label(
+                    outfit),
+            )
+            kwargs: dict = {"text": text}
+            if reason:
+                kwargs["text_color"] = INCOMPLETE_COLOR
+            elif focused:
+                kwargs["text_color"] = FOCUS_COLOR
+            else:
+                kwargs["text_color"] = ("gray10", "gray90")
+            try:
+                row["cb"].configure(**kwargs)
+            except tk.TclError:
+                pass
+
+    def _selected_source_outfit(self) -> Outfit | None:
+        if self._active_source_key is None:
+            return None
+        for row in self._from_checks:
+            if row["outfit"].key == self._active_source_key:
+                return row["outfit"]
+        return None
+
+    def _checked_source_outfits(self) -> list[Outfit]:
+        return [
+            r["outfit"] for r in self._from_checks if bool(r["var"].get())
+        ]
+
+    def _persist_active_name(self) -> None:
+        key = self._active_source_key
+        if key is None:
+            return
+        if getattr(self, "_filling_name", False):
+            return
+        self._outfit_display_names[key] = self.outfit_name_var.get()
+        self._outfit_name_edited[key] = bool(self._name_user_edited)
+
+    def _load_active_name(self) -> None:
+        key = self._active_source_key
+        if key is None:
+            return
+        name = self._outfit_display_names.get(key, self._suggested_outfit_name)
+        self._filling_name = True
+        self.outfit_name_var.set(name)
+        self._filling_name = False
+        self._name_user_edited = bool(self._outfit_name_edited.get(key, False))
+
+    def _choice_for_outfit(self, outfit: Outfit) -> str:
+        choice = self._outfit_to_choice.get(
+            outfit.key, self._outfit_menu_label(outfit))
+        if choice.startswith("Delete"):
+            return DELETE_ACTION
+        return choice
+
+    def _collect_ops(self) -> list[OutfitOp]:
+        """Build ops for every ticked From outfit using its Convert-to choice."""
+        self._persist_active_name()
+        if self._active_source_key is not None:
+            self._outfit_to_choice[self._active_source_key] = self.to_var.get()
+
+        ops: list[OutfitOp] = []
+        allow_delete = self._delete_action_available()
+        for outfit in self._checked_source_outfits():
+            choice = self._choice_for_outfit(outfit)
+            if choice.startswith("Delete"):
+                if allow_delete:
+                    ops.append(OutfitOp(source=outfit, target=None))
+                else:
+                    ops.append(OutfitOp(source=outfit, target=outfit))
+                continue
+            target = self._outfit_from_menu_label(choice)
+            if target is None:
+                continue
+            ops.append(OutfitOp(source=outfit, target=target))
+        return ops
+
+    def _sync_military_face_ui(self):
+        has_convert = any(
+            not self._choice_for_outfit(o).startswith("Delete")
+            for o in self._checked_source_outfits()
+        )
+        converting = has_convert
+        deleting = not has_convert and bool(self._checked_source_outfits())
+        was_disabled = str(self.use_default_face_cb.cget("state")) == "disabled"
+
+        if not converting or deleting:
+            self.use_default_face_cb.configure(state="disabled")
+            self.use_default_face_var.set(True)
+            self.military_face_hint.configure(text="")
+            return
+
+        # Only lock for real mods that already ship face data.
+        if self.loaded and self._loaded_has_face_rewrite():
+            self.use_default_face_cb.configure(state="disabled")
+            self.use_default_face_var.set(False)
+            self.military_face_hint.configure(text="Mod already has face data")
+            return
+
+        self.use_default_face_cb.configure(state="normal")
+        if was_disabled:
+            self.use_default_face_var.set(True)
+        self.military_face_hint.configure(text="")
 
     def _on_set_name_toggled(self):
         if self.set_name_var.get() and not self._name_user_edited:
-            self.outfit_name_var.set(self._suggested_outfit_name)
-            self._name_user_edited = False
+            key = self._active_source_key
+            suggested = self._suggested_outfit_name
+            if key and not self._outfit_name_edited.get(key):
+                self.outfit_name_var.set(
+                    self._outfit_display_names.get(key, suggested))
+                self._name_user_edited = False
         self._sync_name_ui()
         self._save_settings()
 
@@ -448,24 +893,63 @@ class App(_Root):
         if getattr(self, "_filling_name", False):
             return
         self._name_user_edited = True
+        key = self._active_source_key
+        if key is not None:
+            self._outfit_name_edited[key] = True
+            self._outfit_display_names[key] = self.outfit_name_var.get()
 
     def _sync_name_ui(self):
-        target = self._target_outfit()
-        supported = bool(target and target.msg_stem)
-        converting = self._convertible()
+        # Name applies to the focused From row's Convert-to target only.
+        active = self._selected_source_outfit()
+        checked = self._checked_source_outfits()
+        choice = self._choice_for_outfit(active) if active else ""
+        name_target = active_convert_name_target(
+            active, choice, resolve_target=self._outfit_from_menu_label)
+        supported = name_target is not None
+        converting = bool(checked)
+        active_delete = self._is_delete_target()
 
         if not supported:
-            self.set_name_cb.configure(state="disabled")
+            self.set_name_cb.configure(
+                state="disabled", text="Set in-game outfit name")
             self.outfit_name_entry.grid_remove()
-            self.name_hint.configure(
-                text="Custom names: Tank Top, Classic Tank Top, Elza, "
-                     "Noir, Military.")
+            if active_delete and self._delete_action_available():
+                self.name_hint.configure(
+                    text="Delete strips this slot; other ticked outfits "
+                         "still convert.")
+            elif active is not None and converting:
+                dest = "(Delete)" if (choice or "").startswith("Delete") else (
+                    self._outfit_from_menu_label(choice).name
+                    if self._outfit_from_menu_label(choice) else "this target"
+                )
+                other = other_namable_hint(
+                    checked,
+                    choice_for=self._choice_for_outfit,
+                    resolve_target=self._outfit_from_menu_label,
+                    skip_key=active.key,
+                )
+                if other:
+                    self.name_hint.configure(
+                        text=f"{dest} can't be renamed — {other}")
+                else:
+                    self.name_hint.configure(
+                        text=f"{dest} can't be renamed. Custom names: "
+                             "Tank Top, Classic Tank Top, Elza, Noir, Military.")
+            else:
+                self.name_hint.configure(
+                    text="Custom names: Tank Top, Classic Tank Top, Elza, "
+                         "Noir, Military.")
             return
 
         self.set_name_cb.configure(
             state="normal" if converting else "disabled")
+        self.set_name_cb.configure(
+            text=f"Set in-game name for {name_target.name}")
         if self.set_name_var.get() and converting:
-            self.outfit_name_entry.grid()
+            self.outfit_name_entry.grid(
+                row=2, column=1, sticky="ew", padx=(10, 0), pady=(8, 0))
+            self.outfit_name_entry.configure(
+                placeholder_text=f"In-game name for {name_target.name}")
             self.name_hint.configure(text="")
         else:
             self.outfit_name_entry.grid_remove()
@@ -474,6 +958,9 @@ class App(_Root):
     def _refresh_suggested_name(self):
         if not self.loaded:
             self._suggested_outfit_name = ""
+            self._outfit_display_names.clear()
+            self._outfit_name_edited.clear()
+            self._outfit_to_choice.clear()
             self._filling_name = True
             self.outfit_name_var.set("")
             self._filling_name = False
@@ -482,14 +969,16 @@ class App(_Root):
         primary = next(
             (m for m in self.loaded if not m.analysis.modinfo.addonfor),
             self.loaded[0])
-        fallback = self._mod_label(primary.analysis, primary.source)
+        fallback = package_label(primary.analysis, primary.source)
         self._suggested_outfit_name = (
             primary.analysis.suggested_outfit_display_name(fallback)
             or fallback)
-        self._filling_name = True
-        self.outfit_name_var.set(self._suggested_outfit_name)
-        self._filling_name = False
-        self._name_user_edited = False
+        # Seed per-outfit names with the mod suggestion (separate slots can diverge).
+        for outfit in self._convertible_source_outfits():
+            self._outfit_display_names.setdefault(
+                outfit.key, self._suggested_outfit_name)
+            self._outfit_name_edited.setdefault(outfit.key, False)
+        self._load_active_name()
 
     def _close_loaded(self):
         close_loaded([
@@ -498,19 +987,16 @@ class App(_Root):
         ])
         self.loaded.clear()
 
-    def _mod_label(self, analysis: AnalysisResult, source: ModSource) -> str:
-        return mod_label(analysis, source)
-
     def _suggest_bundle_name(self) -> str:
         mains = [m for m in self.loaded if m.analysis.claire_outfits]
         if not mains:
             mains = [m for m in self.loaded if not m.analysis.modinfo.addonfor]
         if mains:
-            return mod_label(mains[0].analysis, mains[0].source)
+            return package_label(mains[0].analysis, mains[0].source)
         for m in self.loaded:
             if m.analysis.modinfo.addonfor:
                 return m.analysis.modinfo.addonfor
-        return mod_label(self.loaded[0].analysis, self.loaded[0].source)
+        return package_label(self.loaded[0].analysis, self.loaded[0].source)
 
     def _detected_outfit_names(self) -> list[str]:
         names: list[str] = []
@@ -522,19 +1008,12 @@ class App(_Root):
                     seen.add(o.name)
         return names
 
-    def _convertible_source_names(self) -> list[str]:
-        detected: set[str] = set()
-        for m in self.loaded:
-            for o in m.analysis.claire_outfits:
-                if is_convertible_outfit(o):
-                    detected.add(o.key)
-        return [
-            self._outfit_menu_label(o) for o in CONVERTIBLE_OUTFITS
-            if o.key in detected
-        ]
-
     def _convertible(self) -> bool:
-        return bool(self.loaded and self._convertible_source_names())
+        return bool(
+            self.loaded
+            and self._convertible_source_outfits()
+            and self._checked_source_outfits()
+        )
 
     # ---------------------------------------------------------------- input
 
@@ -576,13 +1055,14 @@ class App(_Root):
     def _analyze_worker(self, paths: list[Path]):
         packages, errors, infos = analyze_paths(paths)
         loaded = [LoadedMod.from_package(p) for p in packages]
-        self.after(0, self._analysis_done, loaded, errors, infos)
+        self._ui_after(self._analysis_done, loaded, errors, infos)
 
     def _analyze_worker_safe(self, paths: list[Path]):
         try:
             self._analyze_worker(paths)
         except Exception as e:
-            self.after(0, self._analysis_done, [], [f"Unexpected error: {e!r}"], [])
+            self._ui_after(
+                self._analysis_done, [], [f"Unexpected error: {e!r}"], [])
 
     def _analysis_done(
         self,
@@ -600,12 +1080,7 @@ class App(_Root):
             self.path_label.configure(text="No mod loaded")
             for key in self.info_rows:
                 self.info_rows[key].configure(text="-")
-            self.from_menu.configure(values=["-"], state="disabled")
-            self.from_var.set("-")
-            self.to_menu.configure(state="disabled")
-            self.convert_btn.configure(state="disabled")
-            self._refresh_suggested_name()
-            self._sync_name_ui()
+            self._show_idle_convert_ui()
             msg = "\n".join(errors) if errors else "No valid mods found."
             tk.messagebox.showerror("Could not load mod", msg)
             return
@@ -615,20 +1090,17 @@ class App(_Root):
         else:
             self._show_multi_analysis(loaded)
 
-        sources = self._convertible_source_names()
-        if sources:
-            self.from_menu.configure(values=sources, state="normal")
-            self.from_var.set(sources[0])
-            self.to_menu.configure(state="normal")
-            self.convert_btn.configure(state="normal")
-        else:
-            self.from_menu.configure(values=["-"], state="disabled")
-            self.from_var.set("-")
-            self.to_menu.configure(state="disabled")
-            self.convert_btn.configure(state="disabled")
-
+        # Fresh convert state — idle preview choices do not carry over.
+        self._outfit_display_names.clear()
+        self._outfit_name_edited.clear()
+        self._outfit_to_choice.clear()
+        self._active_source_key = None
+        self.use_default_face_var.set(True)
         self._refresh_suggested_name()
-        self._sync_name_ui()
+        self._refresh_to_menu()
+        self._rebuild_from_checks(select_first=True)
+        if not self._convertible_source_outfits():
+            self.convert_btn.configure(state="disabled")
 
         if errors:
             tk.messagebox.showwarning(
@@ -652,7 +1124,7 @@ class App(_Root):
     def _show_multi_analysis(self, loaded: list[LoadedMod]):
         mains = [m for m in loaded if not m.analysis.modinfo.addonfor]
         addons = [m for m in loaded if m.analysis.modinfo.addonfor]
-        names = [mod_label(m.analysis, m.source) for m in loaded]
+        names = [package_label(m.analysis, m.source) for m in loaded]
         self.path_label.configure(
             text=f"{len(loaded)} mods loaded  ·  "
                  f"{len(mains)} main, {len(addons)} addon")
@@ -689,48 +1161,100 @@ class App(_Root):
         self._save_settings()
         return out_path
 
-    def _resolve_outfits(self):
-        return (
-            self._outfit_from_menu_label(self.from_var.get()),
-            self._outfit_from_menu_label(self.to_var.get()),
-        )
-
     def _start_convert(self):
         if self._busy or not self.loaded or not self._convertible():
             return
         out_path = self._ensure_output()
         if out_path is None:
             return
-        source_outfit, target_outfit = self._resolve_outfits()
-        if not source_outfit or not target_outfit:
+        self._persist_active_name()
+        ops = self._collect_ops()
+        if not ops:
             return
 
-        if (source_outfit.key == target_outfit.key
-                and not self._skip_convert_confirm()):
+        converts = [op for op in ops if op.target is not None]
+        identity = [
+            op for op in converts if op.source.key == op.target.key  # type: ignore[union-attr]
+        ]
+        if identity and not self._skip_convert_confirm():
+            names = ", ".join(op.source.name for op in identity)
             if not tk.messagebox.askokcancel(
                     "Confirm conversion",
-                    f"Convert this mod on {target_outfit.name} to itself?\n\n"
+                    f"Convert on {names} to itself?\n\n"
                     "Face and hair will be isolated so this mod won't "
                     "conflict with other Claire outfits."):
                 return
 
+        namable_ops = [
+            op for op in converts
+            if op.target is not None and op.target.msg_stem
+        ]
+        outfit_display_names: dict[str, str] | None = None
         outfit_display_name = None
-        if self.set_name_var.get() and target_outfit.msg_stem:
-            outfit_display_name = self.outfit_name_var.get().strip()
-            if not outfit_display_name:
+        if self.set_name_var.get() and namable_ops:
+            # Ensure the focused row's typed name is stored before collection.
+            self._persist_active_name()
+            missing: list[str] = []
+            names_by_source = dict(self._outfit_display_names)
+            for op in namable_ops:
+                assert op.target is not None
+                text = (names_by_source.get(op.source.key) or "").strip()
+                if not text:
+                    missing.append(op.target.name)
+            if missing:
                 tk.messagebox.showwarning(
                     "Outfit name",
-                    "Enter an in-game outfit name, or uncheck "
-                    "\"Set in-game outfit name\".")
+                    "Enter an in-game name for: "
+                    + ", ".join(missing)
+                    + "\n(focus each Convert-from row that targets them), "
+                    "or uncheck \"Set in-game outfit name\".")
                 return
+            outfit_display_names = collect_display_names_by_target(
+                namable_ops, names_by_source)
+
+        package_target = converts[0].target if converts else ops[0].source
+        assert package_target is not None
+
+        # Snapshot UI-thread state before the worker starts (Tk vars are
+        # not safe to read from background threads).
+        loaded = list(self.loaded)
+        tag_output = self._tag_output_enabled()
+        tag_marker = tag_marker_for(self.settings, package_target)
+        strip_tags = strip_tag_markers(self.settings)
+        bundle_name = self._suggest_bundle_name()
+        military_face = self._military_face_choice()
+        source_outfit = ops[0].source
+        write_log = bool(self.settings.get("write_convert_log", True))
 
         self._busy = True
         self.convert_btn.configure(state="disabled", text="Converting...")
         self._start_progress_ui()
         threading.Thread(
             target=self._convert_worker_safe,
-            args=(source_outfit, target_outfit, out_path, outfit_display_name),
+            args=(
+                loaded, ops, source_outfit, package_target, out_path,
+                outfit_display_name, outfit_display_names, tag_output,
+                tag_marker, strip_tags, bundle_name, military_face, write_log,
+            ),
             daemon=True).start()
+
+    def _ui_after(self, callback, *args):
+        """Schedule a UI callback; no-op if the window was closed."""
+        if self._closed:
+            return
+
+        def _run():
+            if self._closed:
+                return
+            try:
+                callback(*args)
+            except tk.TclError:
+                pass
+
+        try:
+            self.after(0, _run)
+        except tk.TclError:
+            pass
 
     def _start_progress_ui(self):
         self.status_label.configure(text="Converting...", text_color=DIM)
@@ -746,35 +1270,55 @@ class App(_Root):
         self.progress_bar.set(0)
         self.status_label.configure(text="")
 
-    def _convert_worker_safe(self, source_outfit, target_outfit, out_path: Path,
-                             outfit_display_name: str | None = None):
+    def _convert_worker_safe(
+        self, loaded, ops, source_outfit, package_target, out_path: Path,
+        outfit_display_name: str | None,
+        outfit_display_names: dict[str, str] | None,
+        tag_output: bool, tag_marker: str,
+        strip_tags: list[str], bundle_name: str, military_face: str,
+        write_log: bool,
+    ):
         try:
             self._convert_worker(
-                source_outfit, target_outfit, out_path, outfit_display_name)
+                loaded, ops, source_outfit, package_target, out_path,
+                outfit_display_name, outfit_display_names, tag_output,
+                tag_marker, strip_tags, bundle_name, military_face, write_log)
         except Exception as e:
-            self.after(0, self._convert_failed, f"Unexpected error: {e!r}")
+            self._ui_after(
+                self._convert_failed, f"Unexpected error: {e!r}")
 
-    def _convert_worker(self, source_outfit, target_outfit, out_path: Path,
-                        outfit_display_name: str | None = None):
+    def _convert_worker(
+        self, loaded, ops, source_outfit, package_target, out_path: Path,
+        outfit_display_name: str | None,
+        outfit_display_names: dict[str, str] | None,
+        tag_output: bool, tag_marker: str,
+        strip_tags: list[str], bundle_name: str, military_face: str,
+        write_log: bool,
+    ):
         def progress(msg: str):
-            self.after(0, self._on_progress_msg, msg)
+            self._ui_after(self._on_progress_msg, msg)
 
         try:
             report = convert_loaded(
-                self.loaded, source_outfit, target_outfit, out_path,
+                loaded, source_outfit, package_target, out_path,
                 outfit_display_name=outfit_display_name,
-                tag_output=self._tag_output_enabled(),
-                tag_marker=tag_marker_for(self.settings, target_outfit),
-                strip_tags=strip_tag_markers(self.settings),
-                bundle_name=self._suggest_bundle_name(),
-                mod_label=self._mod_label,
+                tag_output=tag_output,
+                tag_marker=tag_marker,
+                strip_tags=strip_tags,
+                bundle_name=bundle_name,
+                mod_label=package_label,
                 progress=progress,
+                military_face=military_face,
+                ops=ops,
+                write_log=write_log,
+                outfit_display_names=outfit_display_names,
             )
-            self.after(0, self._convert_done, report)
+            self._ui_after(self._convert_done, report)
         except (ConversionError, OSError) as e:
-            self.after(0, self._convert_failed, str(e))
+            self._ui_after(self._convert_failed, str(e))
         except Exception as e:
-            self.after(0, self._convert_failed, f"Unexpected error: {e!r}")
+            self._ui_after(
+                self._convert_failed, f"Unexpected error: {e!r}")
 
     def _on_progress_msg(self, msg: str):
         short = msg if len(msg) <= 72 else msg[:69] + "..."
@@ -813,6 +1357,8 @@ class App(_Root):
                 return
 
             msg = f"Saved:\n{out}"
+            if bool(self.settings.get("write_convert_log", True)):
+                msg += "\n\nIncludes convert.log inside the package."
             if warnings:
                 msg += "\n\nWarnings:\n" + "\n".join(f"• {w}" for w in warnings[:12])
                 if len(warnings) > 12:
@@ -847,6 +1393,7 @@ class App(_Root):
                 pass
         self._save_settings()
         self._close_loaded()
+        self._closed = True
         self.destroy()
 
 

@@ -141,6 +141,28 @@ def build_face_addon(tmp_path: Path, name: str = "E2E Face Addon") -> Path:
     return root
 
 
+def build_elza_body_tex_addon(
+    tmp_path: Path,
+    *,
+    name: str = "Elza Body Tex Addon",
+    addon_for: str = "E2E Main Elza",
+) -> Path:
+    """Elza body textures/mdf only (no mesh) — AddonFor overlay case."""
+    root = tmp_path / "elza_body_tex_addon"
+    body = root / MESH / "pl1004"
+    body.mkdir(parents=True)
+    (body / "pl1004.mdf2.10").write_bytes(b"addon-mdf")
+    (body / "pl1004_alb.tex.10").write_bytes(b"addon-tex")
+    write_modinfo(
+        root,
+        name=name,
+        version="1.0",
+        description="Body tex overlay",
+        AddonFor=addon_for,
+    )
+    return root
+
+
 def build_elza_main(tmp_path: Path, name: str = "E2E Main Elza") -> Path:
     root = tmp_path / "elza_main"
     parts = root / PARTS
@@ -150,4 +172,36 @@ def build_elza_main(tmp_path: Path, name: str = "E2E Main Elza") -> Path:
     body.mkdir(parents=True)
     (body / "pl1004.mesh.1").write_bytes(b"mesh")
     write_modinfo(root, name=name, version="1.0")
+    return root
+
+
+def build_casual_claire_style(tmp_path: Path, name: str = "Casual Claire") -> Path:
+    """Jacket textures+mdf without mesh; Tank Top complete (incomplete-slot case)."""
+    root = tmp_path / "casual_claire"
+    parts = root / PARTS
+    parts.mkdir(parents=True)
+    (parts / "pl1000_body_default.pfb.16").write_bytes(b"jacket-body")
+    (parts / "pl1000_body_costume_3.pfb.16").write_bytes(b"tank-body")
+
+    mesh = root / MESH
+    jacket = mesh / "pl1000"
+    jacket.mkdir(parents=True)
+    (jacket / "pl1000.mdf2.10").write_bytes(b"jacket-mdf")
+    (jacket / "pl1000_alb.tex.10").write_bytes(b"jacket-tex")
+    # Intentionally no pl1000.mesh*
+
+    tank = mesh / "pl1001"
+    tank.mkdir(parents=True)
+    (tank / "pl1001.mdf2.10").write_bytes(b"tank-mdf")
+    (tank / "pl1001.mesh.1").write_bytes(b"tank-mesh")
+
+    ui = root / UI_ROOT
+    (ui / "prefab").mkdir(parents=True)
+    (ui / "tex").mkdir(parents=True)
+    (ui / "prefab" / "ui0601_01_00.pfb.16").write_bytes(b"ui-j")
+    (ui / "tex" / "ui0601_01_00_iam.tex.10").write_bytes(b"tex-j")
+    (ui / "prefab" / "ui0601_01_02.pfb.16").write_bytes(b"ui-t")
+    (ui / "tex" / "ui0601_01_02_iam.tex.10").write_bytes(b"tex-t")
+
+    write_modinfo(root, Name=name, Description="Incomplete Jacket + Tank")
     return root
