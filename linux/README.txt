@@ -4,8 +4,8 @@ RE2 Outfit Converter (Linux)
 Same GUI and conversion engine as the Windows app. Converts RE2 Remake Claire
 outfit mods between slots. Your original mod is never changed.
 
-Quick start (GUI)
------------------
+Quick start
+-----------
   chmod +x run.sh
   ./run.sh
 
@@ -22,14 +22,7 @@ The first run creates a local .venv and installs Python packages (internet once)
 Use the window like Windows: pick/drop a mod, set from/to outfit, Convert.
 Prefer .zip mods. For .rar / .7z, install p7zip so "7z" is on PATH.
 
+Costume names (header button) builds a small Fluffy pack that renames Claire
+and Leon costume slots that share one name file. Leave a slot blank for vanilla.
+
 Drop the output .zip into Fluffy's RE2R Mods folder — do not extract it.
-
-CLI (optional)
---------------
-  ./convert.sh list-outfits
-  ./convert.sh analyze ./MyMod.zip
-  ./convert.sh convert ./MyMod.zip --from elza --to noir -o ./out
-  ./menu.sh          # interactive text menu (no GUI)
-
-Outfit keys: jacket, tanktop, classic_jacket, classic_tanktop,
-noir, military, elza

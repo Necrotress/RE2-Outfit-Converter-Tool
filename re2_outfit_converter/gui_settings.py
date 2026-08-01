@@ -47,8 +47,8 @@ def open_settings_dialog(
         value=bool(app.settings.get("write_convert_log", True)))
     _option(
         body, "Write convert log", write_log_var,
-        "Embeds convert.log inside the output zip/folder "
-        "(mod name, From→To, files changed, warnings).")
+        "Embeds convert.log in the output (single mod: next to modinfo; "
+        "multi-mod zip: one root log covering each subfolder).")
 
     skip_confirm_var = tk.BooleanVar(
         value=bool(app.settings.get("skip_convert_confirm", False)))

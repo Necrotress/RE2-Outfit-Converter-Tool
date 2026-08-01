@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from .analyzer import AnalysisResult, PfbSlot
@@ -18,6 +19,47 @@ from .paths import (
     resolve_ci,
 )
 from .reports import ConversionReport
+
+_HAIR_MESH_STEM_RE = re.compile(
+    r"^(pl1\d{3})\.(?:mesh)(?:\.\d+)?$", re.IGNORECASE)
+_HAIR_MDF_STEM_RE = re.compile(
+    r"^(pl1\d{3})\.(?:mdf2)(?:\.\d+)?$", re.IGNORECASE)
+
+
+def detect_hair_asset_stems(
+    staging: Path, hair_folder_id: str,
+) -> tuple[str, str]:
+    """Return (mesh_stem, mdf_stem) for files inside ``hair_folder_id``.
+
+    Custom kits often live as ``pl1605/pl1678.mesh`` — folder id ≠ file stem.
+    Defaults both stems to ``hair_folder_id`` when no matching file is found.
+    """
+    mesh_stem = hair_folder_id
+    mdf_stem = hair_folder_id
+    found_mesh = False
+    found_mdf = False
+    for root in MESH_ROOTS:
+        folder = resolve_ci(staging, f"{root}/{hair_folder_id}")
+        if folder is None or not folder.is_dir():
+            continue
+        for path in folder.iterdir():
+            if not path.is_file():
+                continue
+            if not found_mesh:
+                m = _HAIR_MESH_STEM_RE.match(path.name)
+                if m:
+                    mesh_stem = m.group(1)
+                    found_mesh = True
+            if not found_mdf:
+                m = _HAIR_MDF_STEM_RE.match(path.name)
+                if m:
+                    mdf_stem = m.group(1)
+                    found_mdf = True
+        if found_mesh and found_mdf:
+            break
+    if found_mesh and not found_mdf:
+        mdf_stem = mesh_stem
+    return mesh_stem, mdf_stem
 
 
 def hair_pfb_ext(analysis: AnalysisResult) -> str:
@@ -60,6 +102,8 @@ def write_hair_redirect_slots(
     mesh_id: str | None = None,
     mdf_id: str | None = None,
     chain_id: str | None = None,
+    mesh_stem: str | None = None,
+    mdf_stem: str | None = None,
     overwrite: bool = False,
 ) -> bool:
     """Write redirect PFB into hair slots. Returns False if template missing.
@@ -69,6 +113,9 @@ def write_hair_redirect_slots(
     exclusive hats keep mats/chain on ``pl1071`` while mesh/mdf sit on a
     private folder; isolated shared hair keeps ``pl1070.chain`` (vanilla) so a
     missing ``pl18xx.chain`` cannot freeze on outfit switch.
+
+    ``mesh_stem`` / ``mdf_stem`` may differ from folder ids when files are
+    e.g. ``pl1605/pl1678.mesh`` (same-length pl1xxx stems only).
     """
     template = assets_dir() / "pl1000_hair_redirect_pl1070.pfb.16"
     if not template.is_file():
@@ -76,20 +123,30 @@ def write_hair_redirect_slots(
     mesh_id = mesh_id or hair_id
     mdf_id = mdf_id or hair_id
     chain_id = chain_id or hair_id
+    mesh_stem = mesh_stem or mesh_id
+    mdf_stem = mdf_stem or mdf_id
     target_dir = ensure_dir_ci(staging, PARTS_DIR)
     data = _retarget_hair_id_bytes(template.read_bytes(), "pl1070", hair_id)
-    if mesh_id != hair_id:
-        data = _patch_equal_token(
-            data,
-            f"{hair_id}/{hair_id}.mesh",
-            f"{mesh_id}/{mesh_id}.mesh",
-        )
-    if mdf_id != hair_id:
-        data = _patch_equal_token(
-            data,
-            f"{hair_id}/{hair_id}.mdf2",
-            f"{mdf_id}/{mdf_id}.mdf2",
-        )
+    have_mesh = f"{hair_id}/{hair_id}.mesh"
+    want_mesh = f"{mesh_id}/{mesh_stem}.mesh"
+    if want_mesh != have_mesh:
+        if len(want_mesh) == len(have_mesh):
+            data = _patch_equal_token(data, have_mesh, want_mesh)
+        else:
+            report.warnings.append(
+                f"Hair redirect mesh path length mismatch "
+                f"({have_mesh} → {want_mesh}); path not patched."
+            )
+    have_mdf = f"{hair_id}/{hair_id}.mdf2"
+    want_mdf = f"{mdf_id}/{mdf_stem}.mdf2"
+    if want_mdf != have_mdf:
+        if len(want_mdf) == len(have_mdf):
+            data = _patch_equal_token(data, have_mdf, want_mdf)
+        else:
+            report.warnings.append(
+                f"Hair redirect mdf path length mismatch "
+                f"({have_mdf} → {want_mdf}); path not patched."
+            )
     if chain_id != hair_id:
         data = _patch_equal_token(
             data,
@@ -209,12 +266,17 @@ def ensure_isolated_hair_redirect(
         return
 
     target_slots = list(target.all_slots)
+    mesh_stem, mdf_stem = detect_hair_asset_stems(staging, hair_priv)
+    stem_note = ""
+    if mesh_stem != hair_priv or mdf_stem != hair_priv:
+        stem_note = f" (files {mesh_stem}.mesh/{mdf_stem}.mdf2)"
 
     if hair_priv in EXCLUSIVE_PART_IDS:
         if not write_hair_redirect_slots(
                 staging, analysis, target, report,
-                f"loads exclusive {hair_priv}", slots=target_slots,
-                hair_id=hair_priv, overwrite=True):
+                f"loads exclusive {hair_priv}{stem_note}", slots=target_slots,
+                hair_id=hair_priv,
+                mesh_stem=mesh_stem, mdf_stem=mdf_stem, overwrite=True):
             report.warnings.append(
                 f"Mod ships exclusive hair/hat {hair_priv} but the redirect "
                 "template is missing "
@@ -235,9 +297,10 @@ def ensure_isolated_hair_redirect(
         if not write_hair_redirect_slots(
                 staging, analysis, target, report,
                 f"loads isolated {hair_priv} mesh+mdf "
-                f"(mats/chain {excl})",
+                f"(mats/chain {excl}){stem_note}",
                 slots=target_slots, hair_id=excl,
-                mesh_id=hair_priv, mdf_id=hair_priv, overwrite=True):
+                mesh_id=hair_priv, mdf_id=hair_priv,
+                mesh_stem=mesh_stem, mdf_stem=mdf_stem, overwrite=True):
             report.warnings.append(
                 f"Isolated exclusive hair to {hair_priv} but the redirect "
                 "template is missing — hat may not load."
@@ -247,9 +310,10 @@ def ensure_isolated_hair_redirect(
     if excl and not priv_has_mdf:
         if not write_hair_redirect_slots(
                 staging, analysis, target, report,
-                f"loads isolated {hair_priv} mesh + vanilla {excl}.mdf2",
+                f"loads isolated {hair_priv} mesh + vanilla {excl}.mdf2"
+                f"{stem_note}",
                 slots=target_slots, hair_id=excl, mesh_id=hair_priv,
-                overwrite=True):
+                mesh_stem=mesh_stem, overwrite=True):
             report.warnings.append(
                 f"Isolated exclusive hair to {hair_priv} but the redirect "
                 "template is missing — hat may not load."
@@ -264,10 +328,11 @@ def ensure_isolated_hair_redirect(
         )
         if not write_hair_redirect_slots(
                 staging, analysis, target, report,
-                f"loads isolated {hair_priv} mesh+mdf (chain {chain_id})",
+                f"loads isolated {hair_priv} mesh+mdf (chain {chain_id})"
+                f"{stem_note}",
                 slots=target_slots, hair_id=hair_priv,
                 mesh_id=hair_priv, mdf_id=hair_priv, chain_id=chain_id,
-                overwrite=True):
+                mesh_stem=mesh_stem, mdf_stem=mdf_stem, overwrite=True):
             report.warnings.append(
                 f"Isolated hair to {hair_priv} but the redirect template is "
                 "missing — hat may not load."
@@ -288,6 +353,8 @@ def ensure_isolated_hair_redirect(
     alias_standard_mesh_paths(
         staging, "pl1070", hair_priv, rename_map, report)
 
+    # Redirect stays on pl1070; alias_standard_mesh_paths remaps engine paths
+    # to the private folder (including mismatched stems via rename_map).
     if not write_hair_redirect_slots(
             staging, analysis, target, report,
             f"loads isolated {hair_priv}", slots=missing):

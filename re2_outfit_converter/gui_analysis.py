@@ -20,45 +20,43 @@ def format_mod_row(analysis: AnalysisResult, source: ModSource) -> str:
     return mod_desc + (f"   ({' · '.join(extras)})" if extras else "")
 
 
+def _other_character_note(characters: dict[str, int]) -> str:
+    """Short note when the pack also has non-Claire content."""
+    others = sorted(name for name in characters if name != "Claire")
+    if not others:
+        return ""
+    return "also has " + ", ".join(others)
+
+
 def format_characters(analysis: AnalysisResult) -> str:
-    chars = ", ".join(
-        f"{name} ({count} files)"
-        for name, count in sorted(analysis.characters.items()))
-    return chars or "None detected"
+    """Legacy helper — prefer outfit-row notes for the GUI."""
+    return _other_character_note(analysis.characters) or "Claire only"
 
 
 def format_outfit_row(analysis: AnalysisResult) -> tuple[str, bool]:
-    """Return (outfit_text, ok_color)."""
-    outfit_bits = []
-    for o in analysis.claire_outfits:
-        slots = sorted({p.slot for p in analysis.claire_pfbs
-                        if p.slot in o.all_slots})
-        detail = []
-        if slots:
-            detail.append("PFB slots: " + ", ".join(slots))
-        if o.body_id in analysis.claire_body_ids:
-            detail.append(f"mesh {o.body_id}")
-        outfit_bits.append(
-            f"{o.name}" + (f"  [{'; '.join(detail)}]" if detail else ""))
-    if outfit_bits:
-        outfit_text = "\n".join(outfit_bits)
+    """Return (outfit_text, ok_color) — short names for end users."""
+    names = [o.name for o in analysis.claire_outfits]
+    if names:
+        outfit_text = ", ".join(names)
         outfit_ok = True
     elif analysis.modinfo.addonfor:
         outfit_text = (
             f"Addon for {analysis.modinfo.addonfor} "
-            "(no body remap — batch with the main mod to convert)")
+            "(load with the main mod)"
+        )
         outfit_ok = True
     elif analysis.has_claire_files:
-        outfit_text = (
-            "Claire face/hair addon (no outfit remap — "
-            "batch with a main outfit mod to convert)")
+        outfit_text = "Claire face/hair addon (load with a main outfit mod)"
         outfit_ok = True
     else:
         outfit_text = "No Claire outfit detected"
         outfit_ok = False
-    if analysis.warnings:
-        outfit_text += "\n" + "\n".join(
-            f"! {w}" for w in analysis.warnings[:6])
+
+    note = _other_character_note(analysis.characters)
+    if note and names:
+        outfit_text = f"{outfit_text}  ·  {note}"
+    elif note and not names and outfit_ok:
+        outfit_text = f"{outfit_text}  ·  {note}"
     return outfit_text, outfit_ok
 
 
@@ -67,10 +65,36 @@ def format_multi_characters(loaded) -> str:
     for m in loaded:
         for name, count in m.analysis.characters.items():
             char_counts[name] = char_counts.get(name, 0) + count
-    chars = ", ".join(
-        f"{name} ({count} files)"
-        for name, count in sorted(char_counts.items()))
-    return chars or "None detected"
+    return _other_character_note(char_counts) or "Claire only"
+
+
+def format_multi_outfit_row(loaded) -> tuple[str, bool]:
+    """Short outfit list across a multi-mod load."""
+    names: list[str] = []
+    seen: set[str] = set()
+    for m in loaded:
+        for o in m.analysis.claire_outfits:
+            if o.name not in seen:
+                names.append(o.name)
+                seen.add(o.name)
+    passthrough = sum(1 for m in loaded if not m.analysis.claire_outfits)
+    if names:
+        text = ", ".join(names)
+        ok = True
+    else:
+        text = "None detected"
+        ok = False
+    if passthrough:
+        text += f"  ·  {passthrough} addon(s) with no outfit remap"
+
+    char_counts: dict[str, int] = {}
+    for m in loaded:
+        for name, count in m.analysis.characters.items():
+            char_counts[name] = char_counts.get(name, 0) + count
+    note = _other_character_note(char_counts)
+    if note and names:
+        text = f"{text}  ·  {note}"
+    return text, ok
 
 
 def collect_warnings(report) -> tuple[object | None, list[str]]:

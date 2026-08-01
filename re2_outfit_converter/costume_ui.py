@@ -111,6 +111,8 @@ def _remap_ui_id(
     target: Outfit,
     rename_map: dict[str, str],
     report: ConversionReport,
+    *,
+    prefer_incoming: bool = True,
 ) -> None:
     if old_id == new_id:
         return
@@ -127,15 +129,26 @@ def _remap_ui_id(
             path.name[:m.start(1)] + new_id + path.name[m.end(1):]
         )
         if dest.exists() and dest.resolve() != path.resolve():
-            rel = path.relative_to(staging).as_posix()
-            path.unlink()
-            report.removed_ops.append(rel)
-            report.warnings.append(
-                f"Removed leftover costume preview {path.name} "
-                f"({source.name} → {target.name}; "
-                "target preview already present)."
-            )
-            continue
+            if prefer_incoming:
+                # Convert source art wins over a sibling slot's existing preview
+                # (e.g. Jacket→Tank when both ui0601_01_00 and _02 shipped).
+                dest_rel = dest.relative_to(staging).as_posix()
+                dest.unlink()
+                report.removed_ops.append(dest_rel)
+                report.warnings.append(
+                    f"Replaced existing costume preview {dest.name} with "
+                    f"{source.name} art ({source.name} → {target.name})."
+                )
+            else:
+                rel = path.relative_to(staging).as_posix()
+                path.unlink()
+                report.removed_ops.append(rel)
+                report.warnings.append(
+                    f"Removed leftover costume preview {path.name} "
+                    f"({source.name} → {target.name}; "
+                    "target preview already present)."
+                )
+                continue
         old_rel = path.relative_to(staging).as_posix()
         path.rename(dest)
         new_rel = dest.relative_to(staging).as_posix()
@@ -214,4 +227,5 @@ def convert_costume_ui(
         _remap_ui_id(
             staging, ui_root, old_id, target.ui_id,
             fake, target, rename_map, report,
+            prefer_incoming=False,
         )

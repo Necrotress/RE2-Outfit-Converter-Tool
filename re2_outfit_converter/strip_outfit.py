@@ -6,8 +6,8 @@ import shutil
 from pathlib import Path
 
 from .costume_ui import UI_ROOT, _iter_ui_files
-from .msg_name import MSG_DIR_DLC
-from .outfits import Outfit
+from .msg_name import CLAIRECOS_MSG_STEMS, MSG_DIR_DLC
+from .outfits import EXCLUSIVE_PART_IDS, Outfit
 from .paths import MESH_ROOTS, PARTS_DIR, resolve_ci
 from .reports import ConversionReport
 
@@ -16,10 +16,19 @@ def strip_outfit_slot(
     staging: Path,
     outfit: Outfit,
     report: ConversionReport,
+    *,
+    keep_exclusive_ids: set[str] | None = None,
 ) -> None:
-    """Remove PFB / body mesh / costume UI / outfit MSG for ``outfit``."""
+    """Remove PFB / body mesh / costume UI / outfit MSG for ``outfit``.
+
+    Exclusive hair/hat folders (``pl1071`` / ``pl1075``) are removed when this
+    outfit owns them and they are not in ``keep_exclusive_ids`` (another
+    convert target still needs that hat on its vanilla ID).
+    """
     _strip_pfbs(staging, outfit, report)
     _strip_body_meshes(staging, outfit, report)
+    _strip_exclusive_hair(
+        staging, outfit, report, keep_exclusive_ids=keep_exclusive_ids)
     _strip_costume_ui(staging, outfit, report)
     _strip_outfit_msg(staging, outfit, report)
     report.removed_ops.append(f"stripped outfit slot {outfit.key} ({outfit.name})")
@@ -63,6 +72,43 @@ def _strip_body_meshes(
             report.removed_ops.append(rel)
 
 
+def _strip_exclusive_hair(
+    staging: Path,
+    outfit: Outfit,
+    report: ConversionReport,
+    *,
+    keep_exclusive_ids: set[str] | None = None,
+) -> None:
+    """Remove this outfit's exclusive hat/headband mesh if not kept by converts."""
+    hair_id = outfit.hair_id.lower()
+    if hair_id not in EXCLUSIVE_PART_IDS:
+        return
+    keep = {x.lower() for x in (keep_exclusive_ids or set())}
+    if hair_id in keep:
+        return
+    for root in MESH_ROOTS:
+        root_dir = resolve_ci(staging, root)
+        if root_dir is None or not root_dir.is_dir():
+            continue
+        for entry in list(root_dir.iterdir()):
+            name_low = entry.name.lower()
+            if not (
+                name_low == hair_id
+                or name_low.startswith(hair_id + ".")
+                or name_low.startswith(hair_id + "_")
+            ):
+                continue
+            rel = entry.relative_to(staging).as_posix()
+            if entry.is_dir():
+                shutil.rmtree(entry)
+            else:
+                entry.unlink(missing_ok=True)
+            report.removed_ops.append(rel)
+            report.rename_ops.append(
+                f"stripped exclusive hair {entry.name} with {outfit.name}"
+            )
+
+
 def _strip_costume_ui(
     staging: Path, outfit: Outfit, report: ConversionReport,
 ) -> None:
@@ -83,7 +129,7 @@ def _strip_outfit_msg(
         return
     # Only strip DLC clairecos files. Tank/Classic Tank share mes_sys_costume
     # + reward — removing them would fight sibling slots still in the pack.
-    if stem not in ("elza", "noir", "military", "original"):
+    if stem not in CLAIRECOS_MSG_STEMS:
         return
     parent = resolve_ci(staging, MSG_DIR_DLC)
     if parent is None or not parent.is_dir():

@@ -10,7 +10,7 @@ if [[ ! -f "$ROOT/main.py" ]]; then
   exit 1
 fi
 
-chmod +x "$ROOT/setup.sh" "$ROOT/convert.sh" "$ROOT/run.sh" "$ROOT/menu.sh" 2>/dev/null || true
+chmod +x "$ROOT/setup.sh" "$ROOT/run.sh" 2>/dev/null || true
 
 if [[ ! -x "$ROOT/.venv/bin/python" ]]; then
   echo
@@ -22,10 +22,6 @@ fi
 if [[ -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]]; then
   echo "ERROR: No graphical display (DISPLAY / WAYLAND_DISPLAY unset)."
   echo "The GUI needs a desktop session (or Steam Deck Desktop Mode)."
-  echo "Use the CLI instead:"
-  echo "  ./convert.sh list-outfits"
-  echo "  ./convert.sh convert ./MyMod.zip --from elza --to noir -o ./out"
-  echo "  ./menu.sh"
   exit 1
 fi
 

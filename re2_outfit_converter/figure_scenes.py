@@ -17,7 +17,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from .outfits import Outfit
 from .paths import resolve_ci
 from .reports import ConversionReport
 
@@ -75,74 +74,3 @@ def strip_claire_extra_figures(
     if removed:
         report.warnings.append(note)
     return removed
-
-
-def convert_figure_scenes(
-    staging: Path,
-    source: Outfit,
-    target: Outfit,
-    rename_map: dict[str, str],
-    report: ConversionReport,
-) -> None:
-    """Isolate figure gallery for this convert op.
-
-    ``rename_map`` is unused (kept for call-site compatibility). Author figure
-    files are stripped rather than retargeted so leaky shared mannequin scenes
-    cannot bleed into other DLC viewers.
-    """
-    del rename_map  # no longer registering figure path tokens
-    new_id = target.figure_extra_id
-
-    if not new_id:
-        # Jacket / Tank / Classic — no DLC frame; drop source extras + any
-        # other Claire extras so nothing leaks onto wrong gallery slots.
-        old_id = source.figure_extra_id
-        if old_id:
-            _remove_figure_id(
-                staging, old_id, report,
-                reason=(
-                    f"Removed {{name}} (source figure gallery; "
-                    f"{target.name} has no extra figure slot)."
-                ),
-            )
-        strip_claire_extra_figures(
-            staging, report,
-            reason=(
-                f"Cleared leftover Claire figure gallery file(s) "
-                f"(target {target.name} has no DLC viewer frame)."
-            ),
-        )
-        return
-
-    # DLC target (Noir / Military / Elza / '98): strip all author extras.
-    # Vanilla in-game viewer for the target frame + remapped body mesh.
-    strip_claire_extra_figures(staging, report)
-
-
-def _remove_figure_id(
-    staging: Path,
-    figure_id: str,
-    report: ConversionReport,
-    *,
-    reason: str | None = None,
-) -> None:
-    """Remove figure files for one gallery id. ``reason`` may include ``{name}``."""
-    fmt = reason or (
-        "Removed {name} (source figure gallery; target has no "
-        "extra figure slot)."
-    )
-    for root in _FIGURE_ROOTS:
-        root_dir = resolve_ci(staging, root)
-        if root_dir is None or not root_dir.is_dir():
-            continue
-        for path in list(root_dir.iterdir()):
-            if not path.is_file():
-                continue
-            m = _FIGURE_SCENE_RE.match(path.name) or _FIGURE_PFB_RE.match(
-                path.name)
-            if m is None or m.group(2) != figure_id:
-                continue
-            rel = path.relative_to(staging).as_posix()
-            path.unlink(missing_ok=True)
-            report.removed_ops.append(rel)
-            report.warnings.append(fmt.format(name=path.name))

@@ -31,7 +31,6 @@ def convert_loaded(
     bundle_name: str,
     mod_label: Callable,
     progress: Callable[[str], None] | None = None,
-    military_face: str = "clean",
     ops: Sequence[OutfitOp] | None = None,
     write_log: bool = True,
     outfit_display_names: dict[str, str] | None = None,
@@ -48,7 +47,6 @@ def convert_loaded(
                 tag_marker=tag_marker,
                 strip_tag_markers=strip_tags,
                 source_name=input_base_name(item.source.original),
-                military_face=military_face,
                 write_log=write_log,
                 outfit_display_names=outfit_display_names,
             )
@@ -60,7 +58,6 @@ def convert_loaded(
             tag_marker=tag_marker,
             strip_tag_markers=strip_tags,
             source_name=input_base_name(item.source.original),
-            military_face=military_face,
             write_log=write_log,
             outfit_display_names=outfit_display_names,
         )
@@ -79,7 +76,6 @@ def convert_loaded(
         tag_output=tag_output,
         tag_marker=tag_marker,
         strip_tag_markers=strip_tags,
-        military_face=military_face,
         ops=ops,
         write_log=write_log,
         outfit_display_names=outfit_display_names,

@@ -42,8 +42,8 @@ class Outfit:
 # msg_stem:
 #   DLC (military/noir/elza/original='98) → mes_other_dlc/mes_sys_clairecos_{stem}.msg
 #   Tank Top / Classic Tank Top → shared mes_sys_costume/reward MSG entries
-#   Jacket / Classic Jacket → no custom-name path (same shared MSG file;
-#   shipping it for those slots would fight Tank/Classic-Tank renames)
+#     (convert strips these; rename via Costume name pack UI)
+#   Jacket / Classic Jacket → no msg_stem (same shared MSG file as Tank)
 # Order matches the in-game Claire costume list (Jacket → … → Elza).
 # '98 is detected for analysis only — conversion is unsupported (mesh-swap
 # layout differs from every other Claire outfit).

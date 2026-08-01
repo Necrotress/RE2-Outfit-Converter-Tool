@@ -17,24 +17,29 @@ coverage.xml
 *.cover
 .hypothesis/
 
-# PyInstaller / builds
-build/
-Build/
+# Local PyInstaller leftovers (normal builds go under ../Build)
 dist/
 dist-onefile/
 dist-linux/
 .pyi_work/
 pyi-work/
-pyi-work-onefile/
 pyi-work*/
 warn-*.txt
 xref-*.html
 *.pkg
 *.spec.bak
+
+# Never commit built binaries from Source/
 *.exe
 *.dll
+*.so
+*.dylib
 
-# Local / runtime
+# If a Build/ or Production/ tree is ever created inside Source/
+Build/
+Production/
+
+# Local / runtime (GUI settings, convert output, shortcuts)
 Output/
 _tmp_*/
 _backup_*/
@@ -46,7 +51,7 @@ Thumbs.db
 Desktop.ini
 ehthumbs.db
 
-# Archives / sample mods (large ΓÇö never commit)
+# Archives / sample mods (large — never commit)
 example/
 Examples/
 *.zip
@@ -61,7 +66,7 @@ Mods/
 *.pem
 *.key
 
-# Logs / local dumps (includes embedded convert.log copies if dropped in-tree)
+# Logs / local dumps
 *.log
 *.tmp
 
@@ -77,12 +82,5 @@ Mods/
 _tools/
 _stars_inspect/
 _inspect*/
-
-# Release staging leftovers
-RE2 Outfit Converter - Windows/
-RE2 Outfit Converter - Linux/
-RE2 Outfit Converter - Production/
 _DELETE_ME*/
-
-# Keep README gallery (explicit ΓÇö screenshots/ is not ignored above)
-# screenshots/*.png are tracked for GitHub README
+*.msg.14.bak

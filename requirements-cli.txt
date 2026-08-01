@@ -1,4 +1,0 @@
-# Minimal deps for the command-line converter (no GUI).
-# python -m re2_outfit_converter ...
-mmh3>=4.0.1
-chardet>=5.2.0

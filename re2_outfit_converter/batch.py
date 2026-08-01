@@ -13,6 +13,7 @@ from .hair_prefabs import ensure_isolated_hair_redirect
 from .isolation import (
     isolate_claire_face_hair,
     isolate_shared_outfit_textures,
+    resolve_hair_id_for_target,
     staging_mesh_ids,
 )
 from .outfit_ops import OutfitOp
@@ -40,7 +41,6 @@ def passthrough_folder(
     write_log: bool = True,
     source_name: str | None = None,
     ops: Sequence[OutfitOp] | None = None,
-    military_face: str = "",
 ) -> ConversionReport:
     """Copy a mod into the batch staging folder without outfit remapping.
 
@@ -59,8 +59,10 @@ def passthrough_folder(
         outfit = analysis.claire_outfits[0] if analysis.claire_outfits else target
         face_priv, hair_priv = isolate_claire_face_hair(
             staging, analysis, outfit, target, rename_map, report)
-        ensure_isolated_hair_redirect(
-            staging, analysis, target, hair_priv, rename_map, report)
+        hair_for_t = resolve_hair_id_for_target(staging, target, hair_priv)
+        if hair_for_t:
+            ensure_isolated_hair_redirect(
+                staging, analysis, target, hair_for_t, rename_map, report)
         isolate_shared_outfit_textures(
             staging, face_priv, rename_map, report)
         drop_orphan_part_pfbs(staging, report)
@@ -81,7 +83,6 @@ def passthrough_folder(
                 as_folder=True,
                 tag_output=tag_output,
                 tag_marker=marker or "",
-                military_face=military_face,
                 label=source_name or "",
                 package_name="passthrough folder (includes convert.log)",
             )

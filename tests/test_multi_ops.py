@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from re2_outfit_converter.analyzer import analyze
-from re2_outfit_converter.cli import main
 from re2_outfit_converter.converter import convert_with_ops
 from re2_outfit_converter.outfit_health import incomplete_outfits
 from re2_outfit_converter.outfit_ops import OutfitOp
@@ -123,25 +122,3 @@ def test_two_maps_different_targets(tmp_path: Path):
     msg = folder / MSG_DIR_DLC
     assert (msg / "mes_sys_clairecos_noir.msg.14").is_file()
     assert (msg / "mes_sys_clairecos_military.msg.14").is_file()
-
-
-def test_cli_map_delete(tmp_path: Path, capsys):
-    root = build_casual_claire_style(tmp_path)
-    out = tmp_path / "out"
-    rc = main([
-        "convert", str(root),
-        "--delete", "jacket",
-        "--map", "tanktop:tanktop",
-        "-o", str(out), "--folder", "--no-tag",
-    ])
-    assert rc == 0
-    captured = capsys.readouterr()
-    assert "Saved:" in captured.out
-
-
-def test_cli_analyze_incomplete_warning(tmp_path: Path, capsys):
-    root = build_casual_claire_style(tmp_path)
-    assert main(["analyze", str(root)]) == 0
-    captured = capsys.readouterr()
-    assert "incomplete" in captured.out.lower()
-    assert "Jacket" in captured.out or "jacket" in captured.out.lower()

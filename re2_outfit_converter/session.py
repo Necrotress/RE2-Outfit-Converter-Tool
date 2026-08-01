@@ -27,7 +27,26 @@ class LoadResult:
 
 
 def package_label(analysis: AnalysisResult, source: ModSource) -> str:
-    return input_base_name(source.original) or analysis.modinfo.name or "mod"
+    """UI/batch label for a package.
+
+    Nested roots inside a multi-mod zip/folder use the on-disk folder name
+    (``analysis.root.name``). A single top-level package keeps the dropped
+    archive/folder basename.
+    """
+    root = analysis.root
+    if root is not None:
+        try:
+            nested = root.resolve() != Path(source.folder).resolve()
+        except OSError:
+            nested = root != Path(source.folder)
+        if nested:
+            return root.name
+    return (
+        input_base_name(source.original)
+        or analysis.modinfo.name
+        or (root.name if root is not None else "")
+        or "mod"
+    )
 
 
 def link_orphan_addons(

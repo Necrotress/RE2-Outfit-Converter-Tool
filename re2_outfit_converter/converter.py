@@ -5,7 +5,7 @@ Pipeline orchestration only — helpers live in focused sibling modules.
 Stage order in ``convert_with_ops`` (see also docs/PIPELINE.md):
 
 1. Copy mod to staging
-1b. Strip deleted outfits
+1b. Promote deleted-slot body assets → convert source; strip deleted outfits
 2. PFB outfit slots (per convert op)
 3. Body mesh IDs
 4. Purge leftover source bodies
@@ -16,7 +16,7 @@ Stage order in ``convert_with_ops`` (see also docs/PIPELINE.md):
 9. Isolate face/hair
 10. Isolated hair redirect PFB
 11. Exclusive mesh hide for preview
-12. Face mode (default / dirty / mod face)
+12. Military clean face (auto-seed when target is Military and staging has no face)
 13. Shared outfit textures
 14. Costume MSG (all targets, one pass)
 14b. Strip author figure gallery (convert + delete-only)
@@ -37,6 +37,7 @@ from .analyzer import AnalysisResult
 from .batch import passthrough_folder
 from .contentsholder import sync_dlc_contentsholder
 from .convert_log import (
+    ConvertLogContext,
     context_from_analysis,
     write_batch_log_to_staging,
     write_convert_log_to_staging,
@@ -49,7 +50,11 @@ from .hair_prefabs import (
     ensure_isolated_hair_redirect,
 )
 
-from .isolation import isolate_claire_face_hair, isolate_shared_outfit_textures
+from .isolation import (
+    isolate_claire_face_hair,
+    isolate_shared_outfit_textures,
+    resolve_hair_id_for_target,
+)
 from .meshes import (
     convert_mesh_ids,
     has_mesh_entry,
@@ -57,14 +62,11 @@ from .meshes import (
     retarget_redirect_bodies,
     sync_streaming_meshes,
 )
-from .military_face import (
-    FACE_CLEAN,
-    apply_military_face_mode,
-    resolve_military_face_mode,
-)
-from .msg_name import sync_costume_names_for_targets
+from .military_face import ensure_military_clean_face
+from .msg_name import CLAIRECOS_MSG_STEMS, sync_costume_names_for_targets
 from .outfit_ops import (
     OutfitOp,
+    adapt_ops_for_package,
     convert_ops as filter_convert_ops,
     delete_ops as filter_delete_ops,
     normalize_ops,
@@ -92,6 +94,7 @@ from .packaging import (
 from .path_patch import patch_binaries
 from .material_hash import patch_mdf_material_hashes
 from .prefabs import convert_pfb_slots
+from .promote_body import promote_deleted_body_assets
 from .reports import (
     BatchItem,
     BatchReport,
@@ -124,7 +127,6 @@ def convert(
     tag_marker: str | None = None,
     strip_tag_markers: list[str] | None = None,
     source_name: str | None = None,
-    military_face: str = FACE_CLEAN,
     write_log: bool = True,
     outfit_display_names: dict[str, str] | None = None,
 ) -> ConversionReport:
@@ -141,7 +143,6 @@ def convert(
         tag_marker=tag_marker,
         strip_tag_markers=strip_tag_markers,
         source_name=source_name,
-        military_face=military_face,
         write_log=write_log,
         outfit_display_names=outfit_display_names,
     )
@@ -159,14 +160,15 @@ def convert_with_ops(
     tag_marker: str | None = None,
     strip_tag_markers: list[str] | None = None,
     source_name: str | None = None,
-    military_face: str = FACE_CLEAN,
     write_log: bool = True,
     outfit_display_names: dict[str, str] | None = None,
 ) -> ConversionReport:
     if analysis.root is None:
         raise ConversionError("Analysis has no mod root.")
 
-    ops = normalize_ops(ops)
+    # Per-package: drop From ops this pack lacks; rewrite Delete-only body
+    # AddonFors into convert→target so textures are not wiped.
+    ops = adapt_ops_for_package(analysis, ops)
     converts = filter_convert_ops(ops)
     deletes = filter_delete_ops(ops)
     sources = [op.source for op in converts]
@@ -199,23 +201,27 @@ def convert_with_ops(
         # Multi-target explicit names — validate at least one convert can use them.
         namable = [
             op.target for op in converts
-            if op.target is not None and op.target.msg_stem
+            if op.target is not None
+            and (op.target.msg_stem or "").lower() in CLAIRECOS_MSG_STEMS
         ]
         if not namable:
             raise ConversionError(
                 f"{package_target.name} has no custom in-game name slot "
-                "(supported: Tank Top / Classic Tank Top / Elza / Noir / Military)."
+                "(supported on Convert: Elza / Noir / Military; "
+                "Jacket/Tank/Classic use Costume names)."
             )
     elif display_name:
         msg_target = next(
             (op.target for op in converts
-             if op.target is not None and op.target.msg_stem),
+             if op.target is not None
+             and (op.target.msg_stem or "").lower() in CLAIRECOS_MSG_STEMS),
             None,
         )
         if msg_target is None:
             raise ConversionError(
                 f"{package_target.name} has no custom in-game name slot "
-                "(supported: Tank Top / Classic Tank Top / Elza / Noir / Military)."
+                "(supported on Convert: Elza / Noir / Military; "
+                "Jacket/Tank/Classic use Costume names)."
             )
 
     has_body = any(
@@ -255,10 +261,24 @@ def convert_with_ops(
 
         rename_map: dict[str, str] = {}
 
+        keep_exclusive = {
+            op.target.hair_id
+            for op in converts
+            if op.target is not None and op.target.hair_id in EXCLUSIVE_PART_IDS
+        }
+
+        if deletes and converts:
+            notify("Promoting deleted-slot body assets into convert source...")
+            promote_deleted_body_assets(
+                staging, deletes, converts, rename_map, report)
+
         if deletes:
             notify("Removing deleted outfit slots...")
             for op in deletes:
-                strip_outfit_slot(staging, op.source, report)
+                strip_outfit_slot(
+                    staging, op.source, report,
+                    keep_exclusive_ids=keep_exclusive,
+                )
 
         unique_targets: list[Outfit] = []
         seen_t: set[str] = set()
@@ -309,10 +329,6 @@ def convert_with_ops(
                 sync_streaming_meshes(staging, target, report)
 
             primary_src = primary
-            keep_exclusive = {
-                t.hair_id for t in unique_targets
-                if t.hair_id in EXCLUSIVE_PART_IDS
-            }
             hair_target = next(
                 (t for t in unique_targets
                  if t.hair_id in EXCLUSIVE_PART_IDS),
@@ -333,6 +349,15 @@ def convert_with_ops(
                 ensure_exclusive_hair_override(
                     staging, analysis, src, target, pfbs, report)
 
+            # Tank Top: strip Military *_04 face leftovers before isolation so
+            # they are not moved onto a private face id and path-patched.
+            for target in unique_targets:
+                if target.key != "tanktop":
+                    continue
+                notify("Stripping Military face textures for Tank Top...")
+                ensure_military_clean_face(
+                    staging, target, analysis, report)
+
             notify("Isolating face/hair...")
             face_priv, hair_priv = isolate_claire_face_hair(
                 staging, analysis, primary_src, hair_target,
@@ -340,27 +365,37 @@ def convert_with_ops(
 
             notify("Ensuring private hair prefab...")
             for target in unique_targets:
-                ensure_isolated_hair_redirect(
-                    staging, analysis, target, hair_priv, rename_map, report)
+                hair_for_t = resolve_hair_id_for_target(
+                    staging, target, hair_priv)
+                if hair_for_t:
+                    ensure_isolated_hair_redirect(
+                        staging, analysis, target, hair_for_t,
+                        rename_map, report)
 
             for target in unique_targets:
-                if target.hair_id in EXCLUSIVE_PART_IDS:
-                    notify(
-                        f"Hiding exclusive hat/headband for {target.name}...")
-                    ensure_exclusive_part_mesh_hide(
-                        staging, target, hair_priv, report)
+                if target.hair_id not in EXCLUSIVE_PART_IDS:
+                    continue
+                hair_for_t = resolve_hair_id_for_target(
+                    staging, target, hair_priv)
+                # Do not seed Military preview from a Noir exclusive (or vice
+                # versa); fall back to the bundled hide template.
+                hide_src = hair_for_t
+                if (
+                    hide_src in EXCLUSIVE_PART_IDS
+                    and hide_src != target.hair_id
+                ):
+                    hide_src = ""
+                notify(
+                    f"Hiding exclusive hat/headband for {target.name}...")
+                ensure_exclusive_part_mesh_hide(
+                    staging, target, hide_src, report)
 
             for target in unique_targets:
-                mil_sources = [
-                    op.source for op in converts
-                    if op.target is not None and op.target.key == target.key
-                ]
-                face_mode = resolve_military_face_mode(
-                    target, analysis, mil_sources or [primary_src],
-                    military_face)
-                notify(f"Applying face mode ({face_mode}) for {target.name}...")
-                apply_military_face_mode(
-                    staging, target, face_mode, report)
+                if target.key != "military":
+                    continue
+                notify("Seeding Military clean face if needed...")
+                ensure_military_clean_face(
+                    staging, target, analysis, report)
 
             notify("Isolating shared outfit textures...")
             isolate_shared_outfit_textures(
@@ -391,7 +426,18 @@ def convert_with_ops(
             seed = remaining[0] if remaining else deletes[0].source
             notify("Isolating face/hair...")
             face_priv, hair_priv = isolate_claire_face_hair(
-                staging, analysis, seed, seed, rename_map, report)
+                staging, analysis, seed, seed, rename_map, report,
+                keep_exclusive_ids=set(),
+            )
+            redirect_targets = remaining or [seed]
+            notify("Ensuring private hair prefab...")
+            for outfit in redirect_targets:
+                hair_for_t = resolve_hair_id_for_target(
+                    staging, outfit, hair_priv)
+                if hair_for_t:
+                    ensure_isolated_hair_redirect(
+                        staging, analysis, outfit, hair_for_t,
+                        rename_map, report)
             notify("Isolating shared outfit textures...")
             isolate_shared_outfit_textures(
                 staging, face_priv, rename_map, report)
@@ -425,7 +471,6 @@ def convert_with_ops(
                 tag_output=do_tag,
                 tag_marker=marker or "",
                 display_name=display_name,
-                military_face=military_face,
                 package_name=(
                     f"{'folder' if as_folder else 'zip'} "
                     f"(includes convert.log)"
@@ -477,7 +522,6 @@ def convert_batch(
     tag_output: bool = True,
     tag_marker: str | None = None,
     strip_tag_markers: list[str] | None = None,
-    military_face: str = FACE_CLEAN,
     ops: Sequence[OutfitOp] | None = None,
     write_log: bool = True,
     outfit_display_names: dict[str, str] | None = None,
@@ -511,7 +555,8 @@ def convert_batch(
     zip_path = unique_path(output_dir / zip_name)
 
     used_names: set[str] = set()
-    item_labels: list[str] = []
+    folder_names: list[str] = []
+    item_contexts: list[ConvertLogContext] = []
     staging_tmp = tempfile.TemporaryDirectory(prefix="re2oc_batch_")
     staging_root = Path(staging_tmp.name)
 
@@ -519,11 +564,19 @@ def convert_batch(
 
     try:
         for i, item in enumerate(items, start=1):
-            label = item.label or item.analysis.modinfo.name or f"mod {i}"
-            notify(f"[{i}/{len(items)}] Converting {label}...")
+            root = item.analysis.root
+            preferred = (
+                (root.name if root is not None else "")
+                or item.label
+                or item.analysis.modinfo.name
+                or f"mod {i}"
+            )
             folder_name = unique_folder_name(
-                item.analysis, used_names, preferred=item.label,
-                strip_tag_markers=strip_tag_markers)
+                item.analysis, used_names, preferred=preferred,
+                strip_tag_markers=strip_tag_markers,
+                strip_tags=root is None,
+            )
+            notify(f"[{i}/{len(items)}] Converting {folder_name}...")
             try:
                 item_report = convert_with_ops(
                     item.analysis, use_ops, staging_root,
@@ -534,17 +587,16 @@ def convert_batch(
                     tag_output=tag_output,
                     tag_marker=marker,
                     strip_tag_markers=strip_tag_markers,
-                    military_face=military_face,
-                    write_log=write_log,
+                    write_log=False,
                     outfit_display_names=outfit_display_names,
                 )
             except NothingToConvertError:
                 if item.analysis.root is None:
                     report.warnings.append(
-                        f"{label}: Analysis has no mod root.")
+                        f"{folder_name}: Analysis has no mod root.")
                     continue
                 notify(
-                    f"[{i}/{len(items)}] No outfit remap for {label} — "
+                    f"[{i}/{len(items)}] No outfit remap for {folder_name} — "
                     "packaging as-is...")
                 try:
                     item_report = passthrough_folder(
@@ -552,25 +604,47 @@ def convert_batch(
                         folder_name,
                         tag_output=do_tag, tag_marker=marker,
                         strip_tag_markers=strip_tag_markers,
-                        write_log=write_log,
-                        source_name=label,
+                        write_log=False,
+                        source_name=folder_name,
                         ops=use_ops,
-                        military_face=military_face,
                     )
                     src_names = ", ".join(
                         op.source.name for op in use_ops if op.target)
                     item_report.warnings.append(
-                        f"{label}: no {src_names or 'selected'} assets to "
-                        "remap; packaged as-is.")
+                        f"{folder_name}: no {src_names or 'selected'} assets "
+                        "to remap; packaged as-is.")
                 except (ConversionError, OSError) as e2:
-                    report.warnings.append(f"{label}: {e2}")
+                    report.warnings.append(f"{folder_name}: {e2}")
                     continue
             except ConversionError as e:
-                report.warnings.append(f"{label}: {e}")
+                report.warnings.append(f"{folder_name}: {e}")
                 continue
             used_names.add(folder_name.lower())
             report.items.append(item_report)
-            item_labels.append(label)
+            folder_names.append(folder_name)
+            display = ""
+            if outfit_display_names:
+                for op in use_ops:
+                    if op.target is None:
+                        continue
+                    display = (
+                        outfit_display_names.get(op.target.key) or ""
+                    ).strip()
+                    if display:
+                        break
+            display = display or (outfit_display_name or "").strip()
+            item_contexts.append(context_from_analysis(
+                item.analysis, use_ops,
+                source_name=folder_name,
+                as_folder=True,
+                tag_output=do_tag,
+                tag_marker=marker or "",
+                display_name=display,
+                label=folder_name,
+                package_name=(
+                    f"folder {folder_name}/ (see bundle convert.log)"
+                ),
+            ))
 
         if not report.items:
             raise ConversionError(
@@ -580,7 +654,8 @@ def convert_batch(
         if write_log:
             write_batch_log_to_staging(
                 staging_root, report,
-                item_labels=item_labels,
+                folder_names=folder_names,
+                item_contexts=item_contexts,
                 bundle_name=safe_bundle,
             )
 

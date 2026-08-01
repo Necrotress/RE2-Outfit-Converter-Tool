@@ -147,6 +147,10 @@ def test_e2e_batch_main_plus_orphan_addon(tmp_path: Path):
     assert isolation_seed(addon) == isolation_seed(main)
 
     with zipfile.ZipFile(report.output_zip) as zf:
-        names = zf.namelist()
+        names = [n.replace("\\", "/") for n in zf.namelist()]
     assert any("natives/" in n for n in names)
     assert any(n.lower().endswith("modinfo.ini") for n in names)
+    assert "convert.log" in names
+    assert "convert_batch.log" not in names
+    assert any(n.startswith("elza_main/") for n in names)
+    assert any(n.startswith("face_addon/") for n in names)

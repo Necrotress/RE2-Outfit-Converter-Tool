@@ -21,9 +21,9 @@ MSG_DIR_SYS = "natives/x64/sectionroot/message/mes_sys"
 # name + GUID, not by the filename alone.
 #
 # DLC outfits use mes_other_dlc/mes_sys_clairecos_{stem}.msg.14 (Name+Figure
-# in one file). Tank Top / Classic Tank Top patch shared mes_sys_costume +
-# mes_sys_reward (different entries). Jacket / Classic Jacket are left alone
-# so those renames do not fight over the same shared files in Fluffy.
+# in one file). Jacket / Tank Top / Classic Jacket / Classic Tank Top share
+# mes_sys_costume + mes_sys_reward (different entries). Convert does not
+# rename those four — use the costume name pack tool instead.
 _STEM_ENTRY_IDS: dict[str, dict] = {
     "military": {
         "kind": "clairecos",
@@ -106,10 +106,233 @@ _STEM_ENTRY_IDS: dict[str, dict] = {
 }
 
 SUPPORTED_NAME_STEMS = tuple(sorted(_STEM_ENTRY_IDS))
+CLAIRECOS_MSG_STEMS = frozenset(
+    stem for stem, meta in _STEM_ENTRY_IDS.items()
+    if meta.get("kind") == "clairecos"
+)
 _COSTUME_SYS_STEMS = frozenset(
     stem for stem, meta in _STEM_ENTRY_IDS.items()
     if meta.get("kind") == "costume_sys"
 )
+
+# Shared Fluffy MSG rows in mes_sys_costume / mes_sys_reward.
+# Claire Remake+Classic and Leon base outfits share those files — name pack
+# writes them together. Convert UI does not rename these slots.
+#
+# Each slot: Name entry required; Figure optional (Leon Injured has no figure).
+_SHARED_COSTUME_ENTRY_IDS: dict[str, dict] = {
+    "jacket": {
+        "Name": (
+            "Mes_Sys_Costume_Name_01_00",
+            "9d14e6bb-9377-47c7-90df-3fed8ce71f8f",
+            1870534640,
+        ),
+        "Figure": (
+            "Mes_Sys_Reward_figure05",
+            "aacefbe4-3344-4a9e-b511-88264e8a5b7f",
+            4278327201,
+        ),
+        "figure_who": "Claire",
+    },
+    "tanktop": {
+        "Name": _STEM_ENTRY_IDS["tanktop"]["Name"],
+        "Figure": _STEM_ENTRY_IDS["tanktop"]["Figure"],
+        "figure_who": "Claire",
+    },
+    "classic_jacket": {
+        "Name": (
+            "Mes_Sys_Costume_Name_01_02",
+            "b5535f09-a7d1-47f0-8b39-6069a4f47ffb",
+            861153388,
+        ),
+        "Figure": (
+            "Mes_Sys_Reward_figure07",
+            "a29972ab-cf93-48fe-a8d7-8f3a49613830",
+            2941772288,
+        ),
+        "figure_who": "Claire",
+    },
+    "classic_tanktop": {
+        "Name": _STEM_ENTRY_IDS["classic_tanktop"]["Name"],
+        "Figure": _STEM_ENTRY_IDS["classic_tanktop"]["Figure"],
+        "figure_who": "Claire",
+    },
+    "leon_casual": {
+        "Name": (
+            "Mes_Sys_Costume_Name_00_00",
+            "79685a08-9f29-4ee7-85ca-be5f5cea0c4b",
+            2415760035,
+        ),
+        "Figure": (
+            "Mes_Sys_Reward_figure00",
+            "06f4e984-b2dd-4b91-b0f0-871497db1021",
+            1840678512,
+        ),
+        "figure_who": "Leon",
+    },
+    "leon_police": {
+        "Name": (
+            "Mes_Sys_Costume_Name_00_01",
+            "8f75777f-78a5-4ec2-98bf-cec29d67de77",
+            1036518072,
+        ),
+        "Figure": (
+            "Mes_Sys_Reward_figure01",
+            "e696a97c-c791-4541-9cf3-2b4450ef12e2",
+            2942759806,
+        ),
+        "figure_who": "Leon",
+    },
+    "leon_police_injured": {
+        "Name": (
+            "Mes_Sys_Costume_Name_00_02",
+            "44f45b97-39b8-48b5-8f39-5f05c2e9fd1b",
+            683729378,
+        ),
+        "Figure": None,
+        "figure_who": "Leon",
+    },
+    "leon_classic_police": {
+        "Name": (
+            "Mes_Sys_Costume_Name_00_03",
+            "b6f10c3d-1e07-4156-a370-8c16e5a7b1f0",
+            3548447256,
+        ),
+        "Figure": (
+            "Mes_Sys_Reward_figure02",
+            "c446b934-f7d3-4767-8abc-c059eea526e4",
+            611718085,
+        ),
+        "figure_who": "Leon",
+    },
+    "leon_classic_police_injured": {
+        "Name": (
+            "Mes_Sys_Costume_Name_00_04",
+            "49aac74a-bfbd-48a8-8bc3-31d55b0f9251",
+            1154086672,
+        ),
+        "Figure": None,
+        "figure_who": "Leon",
+    },
+}
+
+SHARED_COSTUME_NAME_VANILLA: dict[str, str] = {
+    "jacket": "Jacket",
+    "tanktop": "Tank Top",
+    "classic_jacket": "Classic Jacket",
+    "classic_tanktop": "Classic Tank Top",
+    "leon_casual": "Casual",
+    "leon_police": "Police",
+    "leon_police_injured": "Police (Injured)",
+    "leon_classic_police": "Classic Police",
+    "leon_classic_police_injured": "Classic Police (Injured)",
+}
+
+SHARED_COSTUME_NAME_LABELS: dict[str, str] = {
+    "jacket": "Jacket",
+    "tanktop": "Tank Top",
+    "classic_jacket": "Classic Jacket",
+    "classic_tanktop": "Classic Tank Top",
+    "leon_casual": "Casual",
+    "leon_police": "Police",
+    "leon_police_injured": "Police (Injured)",
+    "leon_classic_police": "Classic Police",
+    "leon_classic_police_injured": "Classic Police (Injured)",
+}
+
+CLAIRE_NAME_PACK_KEYS: tuple[str, ...] = (
+    "jacket", "tanktop", "classic_jacket", "classic_tanktop",
+)
+LEON_NAME_PACK_KEYS: tuple[str, ...] = (
+    "leon_casual",
+    "leon_police",
+    "leon_police_injured",
+    "leon_classic_police",
+    "leon_classic_police_injured",
+)
+SHARED_COSTUME_NAME_KEYS: tuple[str, ...] = (
+    *CLAIRE_NAME_PACK_KEYS, *LEON_NAME_PACK_KEYS,
+)
+
+# Convert-UI "shared name pack" hint still means Claire's four Remake slots.
+CLAIRE_SHARED_NAME_PACK_KEYS = frozenset(CLAIRE_NAME_PACK_KEYS)
+
+
+def resolve_shared_costume_names(
+    field_values: dict[str, str],
+) -> dict[str, str]:
+    """Resolve dialog fields to final strings (empty → vanilla).
+
+    Requires at least one field that differs from that slot's vanilla name.
+    Resolves every Claire + Leon name-pack slot.
+    """
+    resolved: dict[str, str] = {}
+    changed = False
+    for key, vanilla in SHARED_COSTUME_NAME_VANILLA.items():
+        text = (field_values.get(key) or "").strip() or vanilla
+        resolved[key] = text
+        if text != vanilla:
+            changed = True
+    if not changed:
+        raise ValueError(
+            "Change at least one name (leave others blank for vanilla)."
+        )
+    return resolved
+
+
+def write_shared_costume_names(
+    staging: Path,
+    names: dict[str, str],
+) -> list[str]:
+    """Write Claire + Leon shared costume/reward name rows into staging."""
+    for key in SHARED_COSTUME_NAME_KEYS:
+        if key not in names or not (names[key] or "").strip():
+            raise ValueError(f"Missing shared costume name for {key!r}")
+
+    assets = _assets_dir()
+    costume_tmpl = assets / "mes_sys_costume.msg.14"
+    reward_tmpl = assets / "mes_sys_reward.msg.14"
+    if not costume_tmpl.is_file():
+        raise FileNotFoundError(f"Missing bundled costume MSG: {costume_tmpl}")
+    if not reward_tmpl.is_file():
+        raise FileNotFoundError(f"Missing bundled reward MSG: {reward_tmpl}")
+
+    costume = REMSGUtil.importMSG(str(costume_tmpl))
+    reward = REMSGUtil.importMSG(str(reward_tmpl))
+    ops: list[str] = []
+
+    for key in SHARED_COSTUME_NAME_KEYS:
+        text = names[key].strip()
+        ids = _SHARED_COSTUME_ENTRY_IDS[key]
+        n_name, _n_guid, _n_crc = ids["Name"]
+        name_entry = _find_entry_exact(costume, n_name)
+        if name_entry is None:
+            raise ValueError(f"Costume MSG missing entry {n_name!r}")
+        _set_all_langs(name_entry, text)
+        ops.append(
+            f"set in-game outfit name -> 'mes_sys_costume.msg.14' "
+            f"[{n_name}]: {text!r}"
+        )
+        fig = ids.get("Figure")
+        if fig is not None:
+            f_name, _f_guid, _f_crc = fig
+            figure_entry = _find_entry_exact(reward, f_name)
+            if figure_entry is None:
+                raise ValueError(f"Reward MSG missing entry {f_name!r}")
+            who = ids.get("figure_who") or "Claire"
+            figure_text = f"{who} ({text})"
+            _set_all_langs(figure_entry, figure_text)
+            ops.append(
+                f"set in-game figure name -> 'mes_sys_reward.msg.14' "
+                f"[{f_name}]: {figure_text!r}"
+            )
+
+    costume_dest = staging / MSG_DIR_SYS / "mes_sys_costume.msg.14"
+    reward_dest = staging / MSG_DIR_SYS / "mes_sys_reward.msg.14"
+    costume_dest.parent.mkdir(parents=True, exist_ok=True)
+    REMSGUtil.exportMSG(costume, str(costume_dest))
+    REMSGUtil.exportMSG(reward, str(reward_dest))
+    return ops
 
 
 def _assets_dir() -> Path:
@@ -387,43 +610,37 @@ def sync_costume_name_files(
 ) -> list[str]:
     """Retarget or strip costume-name MSG files for the conversion target.
 
-    - Target with no ``msg_stem`` (Jacket / Classic Jacket): remove all
-      clairecos and shared costume-sys name overrides.
-    - Target with ``msg_stem`` + explicit ``display_name``: write that name.
-    - Target with ``msg_stem`` and no new name: preserve text from an existing
-      clairecos MSG onto the target stem (via template rewrite), then remove
-      leftovers. If nothing readable remains, strip clairecos and leave vanilla.
+    - Jacket / Tank Top / Classic* targets: strip clairecos and shared
+      costume-sys overrides (rename those four via the name pack tool).
+    - DLC ``msg_stem`` + explicit ``display_name``: write that clairecos name.
+    - DLC ``msg_stem`` and no new name: preserve text from an existing
+      clairecos MSG onto the target stem, then remove leftovers.
 
     For multi-target converts, use ``sync_costume_names_for_targets`` instead so
     sibling clairecos files are not deleted between passes.
     """
     name = (display_name or "").strip() or None
     stem = (target.msg_stem or "").lower() or None
-    keep_sys = stem in _COSTUME_SYS_STEMS
 
-    if not stem:
+    # Shared mes_sys rows are owned by the costume name pack, not convert.
+    if not stem or stem in _COSTUME_SYS_STEMS:
         ops = _remove_clairecos_msgs(staging)
         ops.extend(_remove_costume_sys_msgs(staging))
         return ops
 
     if name:
         ops = apply_outfit_display_name(staging, stem, name)
-        if not keep_sys:
-            ops.extend(_remove_costume_sys_msgs(staging))
+        ops.extend(_remove_costume_sys_msgs(staging))
         return ops
 
     preserved = _preserved_display_name(staging)
     if preserved:
         ops = apply_outfit_display_name(staging, stem, preserved)
-        if not keep_sys:
-            ops.extend(_remove_costume_sys_msgs(staging))
+        ops.extend(_remove_costume_sys_msgs(staging))
         return ops
 
-    # No custom name to carry — drop leftover clairecos so source slot is clean.
-    # Keep shared costume-sys msgs only when target uses them (already written).
     ops = _remove_clairecos_msgs(staging)
-    if not keep_sys:
-        ops.extend(_remove_costume_sys_msgs(staging))
+    ops.extend(_remove_costume_sys_msgs(staging))
     return ops
 
 
@@ -440,8 +657,11 @@ def sync_costume_names_for_targets(
     Unlike looping ``sync_costume_name_files``, this keeps all target clairecos
     files (Noir + Military, etc.) instead of deleting siblings on each call.
 
+    Shared Jacket/Tank/Classic MSG files are always stripped on convert —
+    rename those with the costume name pack tool.
+
     ``display_names`` maps target outfit key → explicit in-game name. When set,
-    those names win per target; other targets fall back to preserved text.
+    those names win per clairecos target; other targets fall back to preserved.
     """
     targets = list(targets)
     if not targets:
@@ -464,7 +684,11 @@ def sync_costume_names_for_targets(
     # Capture before any rewrite so secondary targets share the source name.
     preserved = _preserved_display_name(staging)
 
-    stemmed = [t for t in targets if (getattr(t, "msg_stem", None) or "")]
+    stemmed = [
+        t for t in targets
+        if (getattr(t, "msg_stem", None) or "")
+        and str(t.msg_stem).lower() in CLAIRECOS_MSG_STEMS
+    ]
     if not stemmed:
         ops = _remove_clairecos_msgs(staging)
         ops.extend(_remove_costume_sys_msgs(staging))
@@ -472,7 +696,6 @@ def sync_costume_names_for_targets(
 
     ops: list[str] = []
     keep_clairecos: list[Path] = []
-    wrote_sys = False
 
     for t in stemmed:
         stem = str(t.msg_stem).lower()
@@ -503,14 +726,10 @@ def sync_costume_names_for_targets(
             apply_outfit_display_name(
                 staging, stem, use_name, cleanup=False)
         )
-        if stem in _COSTUME_SYS_STEMS:
-            wrote_sys = True
-        else:
-            keep_clairecos.append(
-                staging / MSG_DIR_DLC / f"mes_sys_clairecos_{stem}.msg.14"
-            )
+        keep_clairecos.append(
+            staging / MSG_DIR_DLC / f"mes_sys_clairecos_{stem}.msg.14"
+        )
 
     ops.extend(_remove_clairecos_msgs(staging, keep=keep_clairecos))
-    if not wrote_sys:
-        ops.extend(_remove_costume_sys_msgs(staging))
+    ops.extend(_remove_costume_sys_msgs(staging))
     return ops

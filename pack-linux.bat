@@ -2,12 +2,15 @@
 setlocal EnableExtensions
 cd /d "%~dp0"
 
-echo === Pack RE2 Outfit Converter (Linux) ===
+echo === Pack RE2 Outfit Converter (Linux GUI) ===
 echo.
 
 set "STAGE=%TEMP%\RE2-Outfit-Converter-Linux-pack"
-set "OUTZIP=%~dp0RE2 Outfit Converter (Linux).zip"
+set "VER=1.1.8"
+set "OUTZIP=%~dp0..\Production\RE2.Outfit.Converter.v%VER%.Linux.zip"
 set "WIN_TAR=%SystemRoot%\System32\tar.exe"
+
+if not exist "%~dp0..\Production" mkdir "%~dp0..\Production" >nul 2>&1
 
 if exist "%STAGE%" rmdir /s /q "%STAGE%"
 mkdir "%STAGE%" || (
@@ -18,8 +21,6 @@ mkdir "%STAGE%" || (
 echo [1/3] Copying package files...
 copy /y "linux\run.sh" "%STAGE%\run.sh" >nul
 copy /y "linux\setup.sh" "%STAGE%\setup.sh" >nul
-copy /y "linux\convert.sh" "%STAGE%\convert.sh" >nul
-copy /y "linux\menu.sh" "%STAGE%\menu.sh" >nul
 copy /y "linux\README.txt" "%STAGE%\README.txt" >nul
 copy /y "requirements-linux.txt" "%STAGE%\requirements-linux.txt" >nul
 copy /y "main.py" "%STAGE%\main.py" >nul

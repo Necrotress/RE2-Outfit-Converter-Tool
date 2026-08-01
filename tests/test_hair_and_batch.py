@@ -153,6 +153,27 @@ def test_exclusive_mesh_hide_seeds_noir_from_private_hair(tmp_path: Path):
     assert any("exclusive preview hide" in op for op in report.rename_ops)
 
 
+def test_isolated_hair_redirect_mismatched_stem(tmp_path: Path):
+    """Gameplay hair PFB must load pl1605/pl1678.mesh, not pl1605/pl1605.mesh."""
+    staging = tmp_path
+    hair = staging / MESH_ROOTS[0] / "pl1605"
+    hair.mkdir(parents=True)
+    (hair / "pl1678.mesh.1808312334").write_bytes(b"mesh")
+    (hair / "pl1678.mdf2.10").write_bytes(b"mdf")
+    (staging / PARTS_DIR).mkdir(parents=True)
+    analysis = AnalysisResult(root=staging)
+    report = ConversionReport()
+    ensure_isolated_hair_redirect(
+        staging, analysis, CLAIRE_OUTFIT_BY_KEY["noir"], "pl1605", {}, report)
+    pfb = next((staging / PARTS_DIR).glob("pl1000_hair_*.pfb*"))
+    data = pfb.read_bytes()
+    u16 = lambda s: b"".join(bytes([ord(c), 0]) for c in s)
+    assert u16("pl1605/pl1678.mesh") in data
+    assert u16("pl1605/pl1678.mdf2") in data
+    assert u16("pl1605/pl1605.mesh") not in data
+    assert any("pl1678.mesh" in op for op in report.pfb_ops)
+
+
 def test_exclusive_mesh_hide_from_custom_hair_mismatched_stem(tmp_path: Path):
     """pl1605/pl1678.mesh must become pl1075.mesh for Noir costume preview."""
     staging = tmp_path

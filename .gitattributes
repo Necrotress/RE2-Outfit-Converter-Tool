@@ -1,0 +1,20 @@
+# Default: let Git handle text; normalize to LF in the repo.
+* text=auto eol=lf
+
+# Windows batch files need CRLF when checked out on Windows.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Shell scripts must stay LF (Linux package / WSL).
+*.sh text eol=lf
+
+# Keep vendor / binary assets untouched.
+*.ico binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.mesh* binary
+*.mdf2* binary
+*.pfb* binary
+*.tex* binary
+*.msg.14 binary

@@ -1,6 +1,6 @@
 ================================================================================
 RE2 REMAKE OUTFIT CONVERTER
-User Guide  ·  v1.1.0
+User Guide  ·  v1.1.8
 ================================================================================
 
 Convert Claire costume mods between in-game outfit slots for Fluffy Mod Manager
@@ -25,7 +25,7 @@ QUICK START
 
   1. Extract this archive (you should get RE2 Outfit Converter.exe + this guide).
   2. Run RE2 Outfit Converter.exe
-     (first launch may take a few seconds while it unpacks internally)
+     (first launch may take a few seconds)
   3. Drop a Claire outfit mod onto the window (folder, .zip, .rar, or .7z)
      Tip: drop the main mod plus AddonFor options together for one combined zip
   4. Check the detected outfit(s): tick every Convert-from slot you want to
@@ -49,13 +49,13 @@ WHAT IT DOES
 
   - Remaps Claire outfit slots (body / face / hair prefabs and body meshes)
   - Remaps or clears costume-select preview art for the target outfit
+    (when both Jacket and Tank previews exist, the Convert-from art wins)
   - Optionally sets the in-game costume name (where supported)
   - Isolates shared face / hair so converted mods conflict less in Fluffy
   - Isolates common shared outfit texture folders used by many CR-AW packs
   - Hides vanilla Noir hat / Military headband in gameplay and costume preview
-  - Optional "Vanilla face textures" on any convert (on = Claire's clean
-    face; off = leave the target outfit's normal face). Locked when the pack
-    already includes face data.
+  - Converting to Military auto-seeds Claire's clean face when the mod has no
+    face data; Tank Top strips leftover Military dirty face textures instead
   - Strips DLC "contentsholder" scenes that can break or leak costume UI
   - Tags output zip / modinfo with an outfit label (optional, customizable)
   - Batch: main mod + AddonFor / face-hair packs → one multi-mod Fluffy zip
@@ -83,16 +83,15 @@ SUPPORTED OUTFITS (CLAIRE)
 IN-GAME OUTFIT NAMES
 --------------------------------------------------------------------------------
 
-  Optional "Set in-game outfit name" writes the name shown in the costume menu.
+  Convert "Set in-game outfit name" (Elza / Noir / Military):
+    Writes that outfit's own costume-menu name file.
 
-  Supported targets:
-    Tank Top, Classic Tank Top, Elza, Noir, Military
-
-  Not supported:
-    Jacket (Default), Classic (Jacket)
-
-  Why: those two share the same game name files as Tank Top / Classic Tank Top.
-  Renaming them would fight other mods that change Tank Top names in Fluffy.
+  Costume names button (Claire + Leon tabs):
+    Claire's Jacket / Tank / Classic* and Leon's Casual / Police / Classic
+    Police (and Injured) share one pair of game name files. Create one
+    Fluffy "name pack" that can set either or both so they don't overwrite
+    each other. Leave a field blank to keep that slot's vanilla name.
+    Enable only one such name pack in Fluffy at a time.
 
 
 --------------------------------------------------------------------------------
@@ -106,8 +105,6 @@ LINUX
   Extract it and run ./run.sh — same GUI as Windows (needs Python 3.10+,
   python3-tk, and a desktop session). See that package's README.txt.
 
-  CLI without the GUI: ./convert.sh  or  ./menu.sh
-
 
 --------------------------------------------------------------------------------
 SETTINGS
@@ -116,8 +113,10 @@ SETTINGS
   Open Settings from the main window.
 
   Write convert log
-      Embeds convert.log inside the output zip/folder (next to modinfo.ini).
-      Records mod name, From→To, files changed, warnings, and stage progress.
+      Embeds convert.log inside the output package.
+      Single mod: next to modinfo.ini. Multi-mod zip: one convert.log at the
+      zip root covering every subfolder (each section named after that folder).
+      Records mod name, From→To, file changes, and warnings.
       On by default — turn off if you do not want the log in the package.
 
   Skip conversion confirmation
@@ -143,10 +142,10 @@ TIPS (FLUFFY / RE2R)
   - Prefer .zip inputs when you can; rar/7z need 7-Zip installed.
   - Multi-slot packs: tick every Convert-from slot you want in this run.
     The focused row (▸ marker) is the one whose Convert-to you are editing —
-    click a ticked slot to focus it without unticking. Set in-game name only
-    applies to that row's Convert-to when the target supports names (Noir,
-    Military, Elza, Tank, Classic Tank); Jacket / Classic Jacket cannot be
-    renamed. Each ticked slot keeps its own Convert to. Delete appears only
+    click a ticked slot to focus it without unticking. Set in-game name on
+    Convert only for Noir / Military / Elza. Jacket / Tank / Classic* use
+    the Costume names button instead. Each ticked slot keeps its own
+    Convert to. Delete appears only
     when the mod has more than one outfit — use it to strip a broken slot while
     converting another (e.g. Delete incomplete Jacket + convert Tank → Elza).
     Incomplete slots show in red with a hover tip — Delete is usually safest.
@@ -166,9 +165,8 @@ LIMITATIONS
 
   - Claire outfit mods only (not a general RE Engine mod converter)
   - '98 Classic cannot be converted (different mesh layout)
-  - Jacket / Classic Jacket cannot get custom in-game names (shared MSG files)
-  - Tank Top / Classic Tank Top name overrides ship shared game MSG files —
-    only one such name mod should "win" in Fluffy at a time
+  - Claire Jacket/Tank/Classic* and Leon Casual/Police/Classic* share one
+    name file — use Costume names (one Fluffy name pack at a time)
   - Does not fix Ada / weapon / VFX overlaps between large mod packs
   - Very large texture mods take longer (full copy + binary path patching)
   - Binary path patching only rewrites same-length paths in allowlisted

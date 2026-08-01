@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-time setup: creates .venv and installs GUI + CLI dependencies.
+# One-time setup: creates .venv and installs GUI dependencies.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
@@ -39,8 +39,6 @@ python -m pip install -U pip
 python -m pip install -r requirements-linux.txt
 
 echo
-echo "Setup complete. Run ./run.sh for the GUI, or:"
-echo "  ./convert.sh convert ./MyMod.zip --from elza --to noir -o ./out"
-echo "  ./menu.sh          # text menu (no GUI)"
+echo "Setup complete. Run ./run.sh for the GUI."
 echo
 echo "Prefer .zip inputs. For .rar/.7z install p7zip so '7z' is on PATH."

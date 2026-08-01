@@ -69,11 +69,21 @@ def unique_folder_name(
     used: set[str],
     preferred: str | None = None,
     strip_tag_markers: list[str] | None = None,
+    *,
+    strip_tags: bool = True,
 ) -> str:
-    """Stable inner-folder name for batch zips (no outfit tag)."""
+    """Stable inner-folder name for batch zips (no outfit tag appended).
+
+    When ``strip_tags`` is False (e.g. preserving an on-disk folder name),
+    only ``safe_name`` sanitizes illegal path characters — outfit markers
+    like ``[Noir]`` in the original folder name are kept.
+    """
     base = preferred or analysis.modinfo.name or (
         analysis.root.name if analysis.root else "mod")
-    base = strip_converter_tags(base, strip_tag_markers).strip() or "mod"
+    if strip_tags:
+        base = strip_converter_tags(base, strip_tag_markers).strip() or "mod"
+    else:
+        base = str(base).strip() or "mod"
     name = safe_name(base)
     n = 2
     candidate = name

@@ -5,7 +5,8 @@ Bundled converter assets:
   pl1075 (Noir) / pl1071 (Military) so the costume-select 3D preview does not
   show the vanilla hat/headband (see exclusive_meshes.py)
 - military_face_clean/ — default Claire face textures written over
-  pl1050_04 when "Vanilla face textures" is on (any convert target)
+  pl1050_04 when converting to Military and the mod has no face data.
+  Tank Top converts strip leftover Military *_04 face folders instead.
 - mes_sys_clairecos_{elza,noir,military,original}.msg.14 — vanilla GMSG templates for custom DLC outfit names ('98 = original, detect-only)
 - mes_sys_clairecos_template.msg.14 — fallback (Military) template
 - mes_sys_costume.msg.14 — vanilla costume-select names (Tank / Classic Tank rename)

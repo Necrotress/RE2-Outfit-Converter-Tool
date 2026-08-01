@@ -1,32 +1,50 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_all
+# Onedir Windows build (Nexus / Production). UPX off — AV false positives.
+from PyInstaller.utils.hooks import (
+    collect_data_files,
+    collect_dynamic_libs,
+    collect_submodules,
+)
 
 datas = []
 binaries = []
 hiddenimports = [
     'mmh3',
-    'chardet',
-    'chardet.pipeline',
-    'chardet.pipeline.orchestrator',
-    'chardet.pipeline.orchestrator__mypyc',
     'REMSG',
     'REMSGUtil',
     'REWString',
     'HexTool',
 ]
-tmp_ret = collect_all('customtkinter')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('tkinterdnd2')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('chardet')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-try:
-    tmp_ret = collect_all('mmh3')
-    datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-except Exception:
-    pass
+
+# Themes / DnD natives only — not collect_all (avoids dist-info + extras).
+datas += collect_data_files('customtkinter')
+binaries += collect_dynamic_libs('customtkinter')
+datas += collect_data_files('tkinterdnd2')
+binaries += collect_dynamic_libs('tkinterdnd2')
+
+# chardet (REMSG) ships many mypyc pipeline extensions — collect them all.
+hiddenimports += collect_submodules('chardet')
+binaries += collect_dynamic_libs('chardet')
+
 datas += [('re2_outfit_converter/assets', 're2_outfit_converter/assets')]
 datas += [('re2_outfit_converter/vendor/remsg', 're2_outfit_converter/vendor/remsg')]
+
+
+def _runtime_toc(entries):
+    """Drop metadata / tests / stray docs that clutter _internal."""
+    kept = []
+    for entry in entries:
+        dest = str(entry[0]).replace('\\', '/').lower()
+        if '.dist-info/' in dest or dest.endswith('.dist-info'):
+            continue
+        if '/tests/' in dest or dest.startswith('tests/'):
+            continue
+        if '/test/' in dest or dest.startswith('test/'):
+            continue
+        if dest.endswith('.md') and 're2_outfit_converter/' not in dest:
+            continue
+        kept.append(entry)
+    return kept
 
 
 a = Analysis(
@@ -36,12 +54,32 @@ a = Analysis(
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
-    hooksconfig={},
+    hooksconfig={
+        'pil': {
+            'include_plugins': [
+                'BmpImagePlugin',
+                'GifImagePlugin',
+                'JpegImagePlugin',
+                'PngImagePlugin',
+                'WebPImagePlugin',
+            ],
+        },
+    },
     runtime_hooks=[],
-    excludes=[],
+    excludes=[
+        'numpy',
+        'numpy.libs',
+        'pytest',
+        '_pytest',
+        'py',
+        'pluggy',
+    ],
     noarchive=False,
     optimize=0,
 )
+a.datas = _runtime_toc(a.datas)
+a.binaries = _runtime_toc(a.binaries)
+
 pyz = PYZ(a.pure)
 
 exe = EXE(

@@ -59,6 +59,25 @@ def allocate_private_ids(seed: str, reserved: set[str]) -> tuple[str, str]:
         raise ConversionError(
             "Could not allocate a free private hair mesh ID (pl1800–pl1899).")
     return face_id, hair_id
+
+
+def allocate_extra_private_id(
+    seed: str, reserved: set[str], purpose: str,
+) -> str:
+    """Allocate another pl18xx ID when isolating multiple hair kits."""
+    digest = hashlib.sha1(
+        f"{seed}\0{purpose}".encode("utf-8", errors="replace")
+    ).hexdigest()
+    start = int(digest[:8], 16) % 100
+    for offset in range(100):
+        cand = f"pl{1800 + ((start + offset) % 100)}"
+        if cand not in reserved:
+            reserved.add(cand)
+            return cand
+    raise ConversionError(
+        f"Could not allocate a free private mesh ID for {purpose} "
+        "(pl1800–pl1899)."
+    )
 def pick_present_id(present: set[str], preferred: list[str]) -> str | None:
     for pid in preferred:
         if pid in present:
@@ -100,8 +119,12 @@ def isolate_claire_face_hair(
     (defaults to ``{target.hair_id}``). Multi-map packs must pass every
     exclusive target so a secondary Noir/Military keep is not mis-isolated.
 
-    Returns ``(face_id, hair_id)`` actually present after isolation (private
-    and/or exclusive).
+    All present hair kits are processed in one pass (kept exclusives, isolated
+    exclusives, shared ``pl1070``, custom folders) — not just the first match.
+
+    Returns ``(face_id, primary_hair_id)`` after isolation. ``primary_hair_id``
+    prefers custom → isolated shared → isolated exclusive → kept exclusive.
+    Use :func:`resolve_hair_id_for_target` to pick the redirect ID per outfit.
     """
     seed = isolation_seed(analysis)
     present = staging_mesh_ids(staging)
@@ -115,15 +138,6 @@ def isolate_claire_face_hair(
         present,
         [source.head_id, target.head_id, *sorted(CLAIRE_FACE_IDS)],
     )
-    hair_src = pick_present_id(
-        present,
-        [source.hair_id, target.hair_id, "pl1070", *sorted(CLAIRE_HAIR_MESH_IDS)],
-    )
-    # Mods that already ship a private hair folder (e.g. pl1605 with pl1678
-    # mesh files) never hit pl1070 — pick those next so exclusive preview hide
-    # and hair redirects use the mod hair instead of the bundled vanilla kit.
-    if hair_src is None:
-        hair_src = pick_custom_hair_id(staging, present, analysis)
 
     face_out = face_priv
     if face_src and face_src != face_priv:
@@ -139,55 +153,114 @@ def isolate_claire_face_hair(
     elif face_src:
         face_out = face_src
 
-    hair_out = ""
-    if hair_src and hair_src in EXCLUSIVE_PART_IDS:
-        if hair_src in keep_excl:
+    custom_hair = pick_custom_hair_id(staging, present, analysis)
+    kept_exclusives: list[str] = []
+    isolated_exclusive: str | None = None
+    isolated_shared: str | None = None
+
+    # Keep exclusives that convert targets still need on vanilla IDs.
+    for excl in sorted(EXCLUSIVE_PART_IDS):
+        if excl in present and excl in keep_excl:
             report.rename_ops.append(
-                f"kept exclusive hair {hair_src} "
-                f"(vanilla {hair_src}.mdf2 binds hat/scarf textures)"
+                f"kept exclusive hair {excl} "
+                f"(vanilla {excl}.mdf2 binds hat/scarf textures)"
             )
-            hair_out = hair_src
-        else:
-            # Move off the exclusive ID so Military/Noir stay vanilla in-game.
-            # Keep exclusive material names on the mesh; a bundled private
-            # .mdf2 (see exclusive_mdf) binds renamed scarf/hat textures.
-            for root in MESH_ROOTS:
-                root_dir = resolve_ci(staging, root)
-                if root_dir is not None:
-                    rename_entries(
-                        root_dir, staging, hair_src, hair_priv, rename_map,
-                        report, remap_materials=False)
-            alias_standard_mesh_paths(
-                staging, hair_src, hair_priv, rename_map, report)
-            from .exclusive_mdf import ensure_private_exclusive_mdf
-            ensure_private_exclusive_mdf(
-                staging, hair_priv, hair_src, rename_map, report)
-            report.rename_ops.append(
-                f"isolated exclusive hair {hair_src}  ->  {hair_priv} "
-                f"(source slot stays vanilla; private mdf for textures)"
-            )
-            hair_out = hair_priv
-    elif hair_src and is_stable_custom_mesh_id(hair_src):
-        # Already private (pl16xx / pl18xx custom kits) — keep folder as-is.
-        hair_out = hair_src
-        report.rename_ops.append(
-            f"kept custom hair {hair_src} (already private)"
+            kept_exclusives.append(excl)
+
+    # Isolate exclusives not kept (convert-away / Delete leftover risk).
+    for excl in sorted(EXCLUSIVE_PART_IDS):
+        if excl not in present or excl in keep_excl:
+            continue
+        dest = (
+            hair_priv if isolated_exclusive is None and isolated_shared is None
+            else allocate_extra_private_id(seed, reserved, f"excl-{excl}")
         )
-    elif hair_src and hair_src != hair_priv:
         for root in MESH_ROOTS:
             root_dir = resolve_ci(staging, root)
             if root_dir is not None:
                 rename_entries(
-                    root_dir, staging, hair_src, hair_priv, rename_map, report)
+                    root_dir, staging, excl, dest, rename_map,
+                    report, remap_materials=False)
         alias_standard_mesh_paths(
-            staging, hair_src, hair_priv, rename_map, report)
+            staging, excl, dest, rename_map, report)
+        from .exclusive_mdf import ensure_private_exclusive_mdf
+        ensure_private_exclusive_mdf(
+            staging, dest, excl, rename_map, report)
         report.rename_ops.append(
-            f"isolated hair {hair_src}  ->  {hair_priv}")
-        hair_out = hair_priv
-    elif hair_src:
-        hair_out = hair_src
+            f"isolated exclusive hair {excl}  ->  {dest} "
+            f"(source slot stays vanilla; private mdf for textures)"
+        )
+        if isolated_exclusive is None:
+            isolated_exclusive = dest
+        present.discard(excl)
+        present.add(dest)
+
+    # Always isolate shared pl1070 when present (do not skip after exclusives).
+    if "pl1070" in present:
+        dest = (
+            hair_priv
+            if isolated_exclusive is None and isolated_shared is None
+            else allocate_extra_private_id(seed, reserved, "shared-pl1070")
+        )
+        for root in MESH_ROOTS:
+            root_dir = resolve_ci(staging, root)
+            if root_dir is not None:
+                rename_entries(
+                    root_dir, staging, "pl1070", dest, rename_map, report)
+        alias_standard_mesh_paths(
+            staging, "pl1070", dest, rename_map, report)
+        report.rename_ops.append(f"isolated hair pl1070  ->  {dest}")
+        isolated_shared = dest
+        present.discard("pl1070")
+        present.add(dest)
+
+    if custom_hair and is_stable_custom_mesh_id(custom_hair):
+        report.rename_ops.append(
+            f"kept custom hair {custom_hair} (already private)"
+        )
+        hair_out = custom_hair
+    elif isolated_shared:
+        hair_out = isolated_shared
+    elif isolated_exclusive:
+        hair_out = isolated_exclusive
+    elif kept_exclusives:
+        # Prefer target's exclusive when kept, else first kept.
+        if target.hair_id in kept_exclusives:
+            hair_out = target.hair_id
+        elif source.hair_id in kept_exclusives:
+            hair_out = source.hair_id
+        else:
+            hair_out = kept_exclusives[0]
+    else:
+        hair_out = ""
 
     return face_out, hair_out
+
+
+def resolve_hair_id_for_target(
+    staging: Path,
+    target: Outfit,
+    primary_hair: str,
+) -> str:
+    """Pick the hair mesh ID this convert target's redirect should load.
+
+    Never cross-wires one exclusive hat (e.g. Noir ``pl1075``) into another
+    exclusive slot (Military ``pl1071``). Prefers the target's own kept
+    exclusive, then shared/custom ``primary_hair``.
+    """
+    present = staging_mesh_ids(staging)
+    tid = target.hair_id
+    if tid in EXCLUSIVE_PART_IDS and tid in present:
+        return tid
+    if not primary_hair or primary_hair not in present:
+        return ""
+    if (
+        primary_hair in EXCLUSIVE_PART_IDS
+        and primary_hair != tid
+    ):
+        # Wrong exclusive for this slot — leave hide-vanilla redirect alone.
+        return ""
+    return primary_hair
 
 
 def is_stable_custom_mesh_id(mesh_id: str) -> bool:

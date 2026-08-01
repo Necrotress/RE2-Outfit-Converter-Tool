@@ -24,28 +24,25 @@ from .archive import ModSource
 from .gui_analysis import (
     collect_warnings,
     count_patch_skips,
-    format_characters,
     format_mod_row,
-    format_multi_characters,
+    format_multi_outfit_row,
     format_outfit_row,
 )
+from .gui_name_pack import open_name_pack_dialog
 from .gui_settings import open_settings_dialog
 from .gui_workers import analyze_paths, convert_loaded
-from .military_face import (
-    FACE_CLEAN,
-    FACE_DIRTY,
-    analysis_has_face_rewrite,
-)
 from .name_ui import (
+    SHARED_NAME_PACK_HINT,
     active_convert_name_target,
     collect_display_names_by_target,
     from_checkbox_label,
-    other_namable_hint,
+    is_convert_namable,
+    uses_shared_name_pack,
 )
 from .outfit_health import incomplete_outfits_for_load
 from .outfit_ops import OutfitOp
 from .outfits import CONVERTIBLE_OUTFITS, Outfit, is_convertible_outfit
-from .reports import ConversionError
+from .reports import BatchReport, ConversionError
 from .session import LoadedPackage, close_loaded, package_label
 from .settings import (
     app_dir,
@@ -103,7 +100,7 @@ class App(_Root):
         super().__init__()
 
         self.title(f"RE2 Remake Outfit Converter  v{__version__}")
-        self.minsize(820, 700)
+        self.minsize(780, 620)
         ctk.set_widget_scaling(1.0)
         ctk.set_window_scaling(1.0)
         icon = icon_path()
@@ -136,9 +133,6 @@ class App(_Root):
 
         self._restore_geometry()
         self._build_ui()
-        # Restore persisted face mode (checkbox defaults to clean/True).
-        self.use_default_face_var.set(
-            self.settings.get("military_face", FACE_CLEAN) != FACE_DIRTY)
         if HAS_DND:
             self.drop_target_register(DND_FILES)
             self.dnd_bind("<<Drop>>", self._on_drop)
@@ -150,7 +144,7 @@ class App(_Root):
     def _build_ui(self):
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
-        self.grid_rowconfigure(2, weight=2)
+        self.grid_rowconfigure(3, weight=1)
 
         header = ctk.CTkFrame(self, fg_color="transparent")
         header.grid(row=0, column=0, sticky="ew", padx=14, pady=(10, 0))
@@ -161,10 +155,16 @@ class App(_Root):
             font=ctk.CTkFont(size=14, weight="bold"),
             anchor="w",
         ).grid(row=0, column=0, sticky="w")
+        header_btns = ctk.CTkFrame(header, fg_color="transparent")
+        header_btns.grid(row=0, column=1, sticky="e")
         ctk.CTkButton(
-            header, text="Settings", width=96,
+            header_btns, text="Costume names", width=120,
+            command=self._open_name_pack,
+        ).pack(side="left", padx=(0, 8))
+        ctk.CTkButton(
+            header_btns, text="Settings", width=96,
             command=self._open_settings,
-        ).grid(row=0, column=1, sticky="e")
+        ).pack(side="left")
 
         top = ctk.CTkFrame(self, corner_radius=12)
         top.grid(row=1, column=0, sticky="nsew", padx=14, pady=(8, 4))
@@ -189,19 +189,17 @@ class App(_Root):
                       command=self._browse_archive).pack(side="left", padx=6)
 
         mid = ctk.CTkFrame(self, corner_radius=12)
-        mid.grid(row=2, column=0, sticky="nsew", padx=14, pady=4)
+        mid.grid(row=2, column=0, sticky="ew", padx=14, pady=4)
         mid.grid_columnconfigure(1, weight=1)
-        mid.grid_rowconfigure(3, weight=1)
 
         ctk.CTkLabel(mid, text="ANALYSIS", font=ctk.CTkFont(size=12, weight="bold"),
                      text_color=DIM).grid(row=0, column=0, columnspan=2,
-                                          sticky="w", padx=14, pady=(10, 4))
+                                          sticky="w", padx=14, pady=(8, 2))
 
         self.info_rows = {}
         for i, (key, label) in enumerate([
             ("mod", "Mod"),
-            ("characters", "Characters"),
-            ("outfit", "Detected outfit"),
+            ("outfit", "Outfits"),
         ], start=1):
             ctk.CTkLabel(mid, text=label, width=140, anchor="w",
                          text_color=DIM).grid(row=i, column=0, sticky="nw",
@@ -211,7 +209,7 @@ class App(_Root):
             self.info_rows[key] = val
 
         out = ctk.CTkFrame(mid, fg_color="transparent")
-        out.grid(row=4, column=0, columnspan=2, sticky="ew", padx=14, pady=(10, 10))
+        out.grid(row=3, column=0, columnspan=2, sticky="ew", padx=14, pady=(8, 10))
         out.grid_columnconfigure(1, weight=1)
         ctk.CTkLabel(out, text="Output folder", width=140, anchor="w",
                      text_color=DIM).grid(row=0, column=0, sticky="w")
@@ -222,7 +220,7 @@ class App(_Root):
                       command=self._browse_output).grid(row=0, column=2)
 
         bottom = ctk.CTkFrame(self, corner_radius=12)
-        bottom.grid(row=3, column=0, sticky="ew", padx=14, pady=(4, 12))
+        bottom.grid(row=3, column=0, sticky="nsew", padx=14, pady=(4, 12))
         bottom.grid_columnconfigure(0, weight=1)
 
         conv = ctk.CTkFrame(bottom, fg_color="transparent")
@@ -251,55 +249,41 @@ class App(_Root):
 
         opts = ctk.CTkFrame(bottom, fg_color="transparent")
         opts.grid(row=1, column=0, sticky="ew", padx=14, pady=(6, 4))
-        opts.grid_columnconfigure(1, weight=1)
+        opts.grid_columnconfigure(0, weight=1)
 
-        self.use_default_face_var = tk.BooleanVar(value=True)
-        self.use_default_face_cb = ctk.CTkCheckBox(
-            opts, text="Vanilla face textures",
-            variable=self.use_default_face_var,
-            state="disabled",
-            command=self._on_military_face_changed)
-        self.use_default_face_cb.grid(row=0, column=0, columnspan=2, sticky="w")
-        self.military_face_hint = ctk.CTkLabel(
-            opts, text="", text_color=DIM, anchor="w",
-            font=ctk.CTkFont(size=11))
-        self.military_face_hint.grid(row=1, column=0, columnspan=2, sticky="w",
-                                     pady=(1, 0))
-        self._bind_tooltip(
-            self.use_default_face_cb,
-            "On = seed Claire's clean/default face textures into the\n"
-            "converted mod (replaces Military's dirty face when that\n"
-            "slot is involved).\n"
-            "Off = leave the target outfit's normal face look.\n"
-            "Ignored if the mod already ships its own face data.")
+        name_row = ctk.CTkFrame(opts, fg_color="transparent")
+        name_row.grid(row=0, column=0, sticky="ew")
+        name_row.grid_columnconfigure(0, weight=1)
 
         self.set_name_var = tk.BooleanVar(
             value=bool(self.settings.get("set_outfit_name", False)))
         self.set_name_cb = ctk.CTkCheckBox(
-            opts, text="Set in-game outfit name",
+            name_row, text="Set in-game outfit name",
             variable=self.set_name_var,
-            command=self._on_set_name_toggled)
-        self.set_name_cb.grid(row=2, column=0, sticky="w", pady=(8, 0))
+            command=self._on_set_name_toggled,
+            height=28)
+        self.set_name_cb.grid(row=0, column=0, sticky="w")
         self._bind_tooltip(
             self.set_name_cb,
             "Sets the costume-select name shown in-game.\n"
-            "Works for Tank Top, Classic Tank Top, Elza, Noir,\n"
-            "and Military.\n"
-            "Jacket and Classic Jacket share those same name files,\n"
-            "so renaming them would conflict with Tank Top renames.")
+            "Works for Elza, Noir, and Military on Convert.\n"
+            "Jacket / Tank Top / Classic Jacket / Classic Tank Top\n"
+            "share one name file — use Costume names instead.")
 
         self.outfit_name_var = tk.StringVar(value="")
         self.outfit_name_entry = ctk.CTkEntry(
-            opts, textvariable=self.outfit_name_var,
-            placeholder_text="In-game outfit name")
+            name_row, textvariable=self.outfit_name_var,
+            placeholder_text="In-game outfit name", height=28,
+            state="disabled")
+        # Always gridded so Convert-to switches don't resize the window.
         self.outfit_name_entry.grid(
-            row=2, column=1, sticky="ew", padx=(10, 0), pady=(8, 0))
+            row=1, column=0, sticky="ew", pady=(8, 0))
         self.outfit_name_var.trace_add("write", self._on_outfit_name_typed)
 
         self.name_hint = ctk.CTkLabel(
             opts, text="", text_color=DIM, anchor="w",
-            font=ctk.CTkFont(size=11))
-        self.name_hint.grid(row=3, column=0, columnspan=2, sticky="w", pady=(1, 0))
+            font=ctk.CTkFont(size=11), height=18)
+        self.name_hint.grid(row=1, column=0, sticky="ew", pady=(1, 0))
 
         self.convert_btn = ctk.CTkButton(
             bottom, text="Convert", height=42, state="disabled",
@@ -347,7 +331,7 @@ class App(_Root):
                 return
             except tk.TclError:
                 pass
-        self.geometry("820x780")
+        self.geometry("820x680")
 
     def _capture_geometry(self):
         try:
@@ -406,10 +390,6 @@ class App(_Root):
         self._capture_geometry()
         self.settings["output_dir"] = self.out_var.get()
         self.settings["set_outfit_name"] = bool(self.set_name_var.get())
-        # Preview (no mod) face toggles are cosmetic — don't persist them.
-        if (self.loaded
-                and str(self.use_default_face_cb.cget("state")) != "disabled"):
-            self.settings["military_face"] = self._military_face_choice()
         if not write_settings(self.settings) and not self._settings_write_warned:
             self._settings_write_warned = True
             try:
@@ -419,6 +399,33 @@ class App(_Root):
                     "(folder may be read-only). Preferences will not persist.")
             except tk.TclError:
                 pass
+
+    def _open_name_pack(self):
+        out = Path(self.out_var.get().strip() or initial_output_dir(self.settings))
+        if not out.is_dir():
+            try:
+                out.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                tk.messagebox.showerror(
+                    "Costume names",
+                    f"Output folder is not available:\n{out}")
+                return
+
+        def on_created(path: Path):
+            self.out_var.set(str(path.parent))
+            self._save_settings()
+            if self._skip_completion_dialog():
+                self.status_label.configure(
+                    text=f"Name pack created: {path.name}",
+                    text_color=OK_COLOR)
+            else:
+                tk.messagebox.showinfo(
+                    "Costume names",
+                    f"Created Fluffy name pack:\n{path}\n\n"
+                    "Enable this mod in Fluffy to apply the costume-menu "
+                    "names. Use only one such name pack at a time.")
+
+        open_name_pack_dialog(self, output_dir=out, on_created=on_created)
 
     def _open_settings(self):
         if self._settings_win is not None and self._settings_win.winfo_exists():
@@ -533,19 +540,6 @@ class App(_Root):
         if src is not None:
             self._outfit_to_choice[src.key] = self.to_var.get()
         self._sync_name_ui()
-        self._sync_military_face_ui()
-
-    def _on_military_face_changed(self, _value=None):
-        self._save_settings()
-
-    def _military_face_choice(self) -> str:
-        """Return clean when checked, dirty when unchecked (mod-face lock ignored)."""
-        if self.use_default_face_var.get():
-            return FACE_CLEAN
-        return FACE_DIRTY
-
-    def _loaded_has_face_rewrite(self) -> bool:
-        return any(analysis_has_face_rewrite(m.analysis) for m in self.loaded)
 
     def _collect_incomplete(self) -> dict[str, str]:
         return incomplete_outfits_for_load(
@@ -604,7 +598,6 @@ class App(_Root):
             self.to_menu.configure(state="disabled")
             self.convert_btn.configure(state="disabled")
             self._sync_name_ui()
-            self._sync_military_face_ui()
             return
 
         outfit_keys = {o.key for o in outfits}
@@ -730,7 +723,6 @@ class App(_Root):
             self.to_menu.configure(state="disabled")
             self.convert_btn.configure(state="disabled")
             self._sync_name_ui()
-            self._sync_military_face_ui()
             return
 
         if active is None:
@@ -760,7 +752,6 @@ class App(_Root):
         self._refresh_from_focus_labels()
         self._load_active_name()
         self._sync_name_ui()
-        self._sync_military_face_ui()
 
     def _refresh_from_focus_labels(self) -> None:
         """Show ▸ on the focused From row; keep incomplete color when needed."""
@@ -849,33 +840,6 @@ class App(_Root):
             ops.append(OutfitOp(source=outfit, target=target))
         return ops
 
-    def _sync_military_face_ui(self):
-        has_convert = any(
-            not self._choice_for_outfit(o).startswith("Delete")
-            for o in self._checked_source_outfits()
-        )
-        converting = has_convert
-        deleting = not has_convert and bool(self._checked_source_outfits())
-        was_disabled = str(self.use_default_face_cb.cget("state")) == "disabled"
-
-        if not converting or deleting:
-            self.use_default_face_cb.configure(state="disabled")
-            self.use_default_face_var.set(True)
-            self.military_face_hint.configure(text="")
-            return
-
-        # Only lock for real mods that already ship face data.
-        if self.loaded and self._loaded_has_face_rewrite():
-            self.use_default_face_cb.configure(state="disabled")
-            self.use_default_face_var.set(False)
-            self.military_face_hint.configure(text="Mod already has face data")
-            return
-
-        self.use_default_face_cb.configure(state="normal")
-        if was_disabled:
-            self.use_default_face_var.set(True)
-        self.military_face_hint.configure(text="")
-
     def _on_set_name_toggled(self):
         if self.set_name_var.get() and not self._name_user_edited:
             key = self._active_source_key
@@ -898,6 +862,13 @@ class App(_Root):
             self._outfit_name_edited[key] = True
             self._outfit_display_names[key] = self.outfit_name_var.get()
 
+    def _set_name_entry_enabled(self, enabled: bool, *, placeholder: str):
+        # CTkEntry only accepts placeholder/text changes while normal.
+        self.outfit_name_entry.configure(state="normal")
+        self.outfit_name_entry.configure(placeholder_text=placeholder)
+        if not enabled:
+            self.outfit_name_entry.configure(state="disabled")
+
     def _sync_name_ui(self):
         # Name applies to the focused From row's Convert-to target only.
         active = self._selected_source_outfit()
@@ -912,48 +883,33 @@ class App(_Root):
         if not supported:
             self.set_name_cb.configure(
                 state="disabled", text="Set in-game outfit name")
-            self.outfit_name_entry.grid_remove()
+            self._set_name_entry_enabled(
+                False, placeholder="In-game outfit name")
             if active_delete and self._delete_action_available():
                 self.name_hint.configure(
                     text="Delete strips this slot; other ticked outfits "
                          "still convert.")
             elif active is not None and converting:
-                dest = "(Delete)" if (choice or "").startswith("Delete") else (
-                    self._outfit_from_menu_label(choice).name
-                    if self._outfit_from_menu_label(choice) else "this target"
-                )
-                other = other_namable_hint(
-                    checked,
-                    choice_for=self._choice_for_outfit,
-                    resolve_target=self._outfit_from_menu_label,
-                    skip_key=active.key,
-                )
-                if other:
-                    self.name_hint.configure(
-                        text=f"{dest} can't be renamed — {other}")
+                dest_outfit = None if (choice or "").startswith("Delete") else (
+                    self._outfit_from_menu_label(choice))
+                if uses_shared_name_pack(dest_outfit):
+                    self.name_hint.configure(text=SHARED_NAME_PACK_HINT)
                 else:
-                    self.name_hint.configure(
-                        text=f"{dest} can't be renamed. Custom names: "
-                             "Tank Top, Classic Tank Top, Elza, Noir, Military.")
+                    dest = "(Delete)" if dest_outfit is None else dest_outfit.name
+                    self.name_hint.configure(text=f"{dest} can't be renamed")
             else:
-                self.name_hint.configure(
-                    text="Custom names: Tank Top, Classic Tank Top, Elza, "
-                         "Noir, Military.")
+                self.name_hint.configure(text="")
             return
 
         self.set_name_cb.configure(
             state="normal" if converting else "disabled")
         self.set_name_cb.configure(
             text=f"Set in-game name for {name_target.name}")
-        if self.set_name_var.get() and converting:
-            self.outfit_name_entry.grid(
-                row=2, column=1, sticky="ew", padx=(10, 0), pady=(8, 0))
-            self.outfit_name_entry.configure(
-                placeholder_text=f"In-game name for {name_target.name}")
-            self.name_hint.configure(text="")
-        else:
-            self.outfit_name_entry.grid_remove()
-            self.name_hint.configure(text="")
+        can_edit = bool(self.set_name_var.get() and converting)
+        self._set_name_entry_enabled(
+            can_edit,
+            placeholder=f"In-game name for {name_target.name}")
+        self.name_hint.configure(text="")
 
     def _refresh_suggested_name(self):
         if not self.loaded:
@@ -997,16 +953,6 @@ class App(_Root):
             if m.analysis.modinfo.addonfor:
                 return m.analysis.modinfo.addonfor
         return package_label(self.loaded[0].analysis, self.loaded[0].source)
-
-    def _detected_outfit_names(self) -> list[str]:
-        names: list[str] = []
-        seen: set[str] = set()
-        for m in self.loaded:
-            for o in m.analysis.claire_outfits:
-                if o.name not in seen:
-                    names.append(o.name)
-                    seen.add(o.name)
-        return names
 
     def _convertible(self) -> bool:
         return bool(
@@ -1095,7 +1041,6 @@ class App(_Root):
         self._outfit_name_edited.clear()
         self._outfit_to_choice.clear()
         self._active_source_key = None
-        self.use_default_face_var.set(True)
         self._refresh_suggested_name()
         self._refresh_to_menu()
         self._rebuild_from_checks(select_first=True)
@@ -1115,7 +1060,6 @@ class App(_Root):
         source = item.source
         self.path_label.configure(text=str(source.original))
         self.info_rows["mod"].configure(text=format_mod_row(analysis, source))
-        self.info_rows["characters"].configure(text=format_characters(analysis))
         outfit_text, outfit_ok = format_outfit_row(analysis)
         self.info_rows["outfit"].configure(
             text=outfit_text,
@@ -1133,16 +1077,10 @@ class App(_Root):
             preview += f", +{len(names) - 4} more"
         self.info_rows["mod"].configure(
             text=f"{len(loaded)} mods: {preview}")
-        self.info_rows["characters"].configure(
-            text=format_multi_characters(loaded))
-        outfit_names = self._detected_outfit_names()
-        passthrough = sum(1 for m in loaded if not m.analysis.claire_outfits)
-        outfit_text = ", ".join(outfit_names) if outfit_names else "None detected"
-        if passthrough:
-            outfit_text += f"  (+ {passthrough} addon(s) with no outfit remap)"
+        outfit_text, outfit_ok = format_multi_outfit_row(loaded)
         self.info_rows["outfit"].configure(
             text=outfit_text,
-            text_color=OK_COLOR if outfit_names else WARN_COLOR)
+            text_color=OK_COLOR if outfit_ok else WARN_COLOR)
 
     # ------------------------------------------------------------- convert
 
@@ -1187,7 +1125,7 @@ class App(_Root):
 
         namable_ops = [
             op for op in converts
-            if op.target is not None and op.target.msg_stem
+            if is_convert_namable(op.target)
         ]
         outfit_display_names: dict[str, str] | None = None
         outfit_display_name = None
@@ -1222,7 +1160,6 @@ class App(_Root):
         tag_marker = tag_marker_for(self.settings, package_target)
         strip_tags = strip_tag_markers(self.settings)
         bundle_name = self._suggest_bundle_name()
-        military_face = self._military_face_choice()
         source_outfit = ops[0].source
         write_log = bool(self.settings.get("write_convert_log", True))
 
@@ -1234,7 +1171,7 @@ class App(_Root):
             args=(
                 loaded, ops, source_outfit, package_target, out_path,
                 outfit_display_name, outfit_display_names, tag_output,
-                tag_marker, strip_tags, bundle_name, military_face, write_log,
+                tag_marker, strip_tags, bundle_name, write_log,
             ),
             daemon=True).start()
 
@@ -1275,14 +1212,14 @@ class App(_Root):
         outfit_display_name: str | None,
         outfit_display_names: dict[str, str] | None,
         tag_output: bool, tag_marker: str,
-        strip_tags: list[str], bundle_name: str, military_face: str,
+        strip_tags: list[str], bundle_name: str,
         write_log: bool,
     ):
         try:
             self._convert_worker(
                 loaded, ops, source_outfit, package_target, out_path,
                 outfit_display_name, outfit_display_names, tag_output,
-                tag_marker, strip_tags, bundle_name, military_face, write_log)
+                tag_marker, strip_tags, bundle_name, write_log)
         except Exception as e:
             self._ui_after(
                 self._convert_failed, f"Unexpected error: {e!r}")
@@ -1292,7 +1229,7 @@ class App(_Root):
         outfit_display_name: str | None,
         outfit_display_names: dict[str, str] | None,
         tag_output: bool, tag_marker: str,
-        strip_tags: list[str], bundle_name: str, military_face: str,
+        strip_tags: list[str], bundle_name: str,
         write_log: bool,
     ):
         def progress(msg: str):
@@ -1308,7 +1245,6 @@ class App(_Root):
                 bundle_name=bundle_name,
                 mod_label=package_label,
                 progress=progress,
-                military_face=military_face,
                 ops=ops,
                 write_log=write_log,
                 outfit_display_names=outfit_display_names,
@@ -1358,7 +1294,13 @@ class App(_Root):
 
             msg = f"Saved:\n{out}"
             if bool(self.settings.get("write_convert_log", True)):
-                msg += "\n\nIncludes convert.log inside the package."
+                if isinstance(report, BatchReport):
+                    msg += (
+                        "\n\nIncludes convert.log at the zip root "
+                        "(covers all package folders)."
+                    )
+                else:
+                    msg += "\n\nIncludes convert.log inside the package."
             if warnings:
                 msg += "\n\nWarnings:\n" + "\n".join(f"• {w}" for w in warnings[:12])
                 if len(warnings) > 12:

@@ -205,3 +205,58 @@ def build_casual_claire_style(tmp_path: Path, name: str = "Casual Claire") -> Pa
 
     write_modinfo(root, Name=name, Description="Incomplete Jacket + Tank")
     return root
+
+
+def build_tifa_dual_slot_dress(
+    tmp_path: Path, name: str = "Tifa Dual Dress",
+) -> Path:
+    """Jacket + Tank meshes; dress textures only under Tank (Tifa-style)."""
+    root = tmp_path / "tifa_dual"
+    parts = root / PARTS
+    parts.mkdir(parents=True)
+    (parts / "pl1000_body_default.pfb.16").write_bytes(b"jacket-body")
+    (parts / "pl1000_body_costume_3.pfb.16").write_bytes(b"tank-body")
+
+    mesh = root / MESH
+    jacket = mesh / "pl1000"
+    jacket.mkdir(parents=True)
+    (jacket / "pl1000.mdf2.10").write_bytes(b"jacket-mdf")
+    (jacket / "pl1000.mesh.1").write_bytes(b"jacket-mesh")
+
+    tank = mesh / "pl1001"
+    tank.mkdir(parents=True)
+    (tank / "pl1001.mdf2.10").write_bytes(b"tank-mdf")
+    (tank / "pl1001.mesh.1").write_bytes(b"tank-mesh")
+    (tank / "pl1001_dress_albm.tex.10").write_bytes(b"dress-tex")
+    (tank / "pl1001_cbody_albm.tex.10").write_bytes(b"body-tex")
+
+    streaming = root / MESH_ROOTS[1] / "pl1001"
+    streaming.mkdir(parents=True)
+    (streaming / "pl1001_dress_albm.tex.10").write_bytes(b"dress-stream")
+
+    write_modinfo(
+        root, Name=name,
+        Description="Replaces Default Jacket/Tanktop",
+    )
+    return root
+
+
+def build_tank_dress_tex_addon(
+    tmp_path: Path,
+    *,
+    name: str = "Dress Color Addon",
+    addon_for: str = "Tifa Dual Dress",
+) -> Path:
+    """Tank-only dress texture AddonFor (color overlay)."""
+    root = tmp_path / "dress_tex_addon"
+    body = root / MESH / "pl1001"
+    body.mkdir(parents=True)
+    (body / "pl1001_dress_albm.tex.10").write_bytes(b"color-tex")
+    write_modinfo(
+        root,
+        name=name,
+        version="1.0",
+        description="Dress color overlay",
+        AddonFor=addon_for,
+    )
+    return root

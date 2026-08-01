@@ -60,6 +60,7 @@ def normalize_settings(data: dict) -> dict:
     settings["tag_output"] = bool(settings.get("tag_output", True))
     settings["write_convert_log"] = bool(
         settings.get("write_convert_log", True))
+    settings.pop("military_face", None)
     if not isinstance(settings.get("outfit_tags"), dict):
         settings["outfit_tags"] = default_outfit_tag_markers()
     return settings
@@ -106,6 +107,7 @@ def write_settings(settings: dict) -> bool:
     """
     settings = dict(settings)
     settings.pop("skip_same_outfit_popup", None)
+    settings.pop("military_face", None)
     if not isinstance(settings.get("outfit_tags"), dict):
         settings["outfit_tags"] = default_outfit_tag_markers()
     payload = json.dumps(settings, indent=2)

@@ -5,7 +5,7 @@ Use this instead of embedding full source dumps. Read live code under
 
 ## Architecture docs
 
-- [PIPELINE.md](PIPELINE.md) — 16-stage convert order and stage interactions
+- [PIPELINE.md](PIPELINE.md) — convert stage order and stage interactions
 - [BINARY_PATCHING.md](BINARY_PATCHING.md) — same-length overlays, allowlist, limits
 
 ## Entry points
@@ -13,8 +13,7 @@ Use this instead of embedding full source dumps. Read live code under
 | Entry | Module |
 |-------|--------|
 | GUI | `python main.py` → `gui.run` |
-| CLI | `python -m re2_outfit_converter` → `cli.main` |
-| Load path | `session.load_inputs` (shared by GUI + CLI) |
+| Load path | `session.load_inputs` |
 | Convert | `converter.convert` / `convert_batch` |
 
 ## Review checklist
@@ -26,8 +25,7 @@ Use this instead of embedding full source dumps. Read live code under
 - [ ] AddonFor linking uses `session.link_orphan_addons` (GUI + batch)
 - [ ] Packaging uses public APIs (`make_zip`, `update_modinfo`, …)
 - [ ] E2E tests in `tests/test_e2e_convert.py` pass
-- [ ] CLI `analyze` / `convert` / `list-outfits` work without CustomTkinter
-- [ ] Skipped path patches surface as warnings (GUI + CLI)
+- [ ] Skipped path patches surface as warnings
 - [ ] Converted packs have no author `figurescene_pl1000_*` / `figure_pl1000_*`
       (ids 10–13); Records viewer relies on vanilla scene + remapped body
 - [ ] Multi-target converts keep all target `mes_sys_clairecos_*.msg` files
@@ -42,7 +40,6 @@ Use this instead of embedding full source dumps. Read live code under
   the game's vanilla DLC figure scene
 - Delete-only runs still isolate shared face/hair and remove DLC contentsholders
   (remaining unticked slots are not fully "untouched" at the shared-asset layer)
-- Linux package runs the same CustomTkinter GUI via `./run.sh` (source + venv);
-  CLI via `./convert.sh` / `./menu.sh`
+- Linux package runs the same CustomTkinter GUI via `./run.sh` (source + venv)
 - `gui.py` still holds layout/event wiring; settings/workers/analysis are split out
 - Pack Linux zip with `pack-linux.bat`
