@@ -17,7 +17,9 @@ coverage.xml
 *.cover
 .hypothesis/
 
-# Local PyInstaller leftovers (normal builds go under ../Build)
+# Local PyInstaller / pack outputs (rebuild.bat + pack-*.bat; in-repo)
+build/
+release/
 dist/
 dist-onefile/
 dist-linux/
@@ -35,7 +37,7 @@ xref-*.html
 *.so
 *.dylib
 
-# If a Build/ or Production/ tree is ever created inside Source/
+# Legacy sibling output names if created inside the clone
 Build/
 Production/
 

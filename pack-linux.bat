@@ -2,15 +2,19 @@
 setlocal EnableExtensions
 cd /d "%~dp0"
 
+rem Linux GUI zip under .\release\ (in-repo). Override with RE2OC_RELEASE_DIR.
+
 echo === Pack RE2 Outfit Converter (Linux GUI) ===
 echo.
 
+if not defined RE2OC_RELEASE_DIR set "RE2OC_RELEASE_DIR=%~dp0release"
+for %%I in ("%RE2OC_RELEASE_DIR%") do set "PROD=%%~fI"
 set "STAGE=%TEMP%\RE2-Outfit-Converter-Linux-pack"
 set "VER=1.1.8"
-set "OUTZIP=%~dp0..\Production\RE2.Outfit.Converter.v%VER%.Linux.zip"
+set "OUTZIP=%PROD%\RE2.Outfit.Converter.v%VER%.Linux.zip"
 set "WIN_TAR=%SystemRoot%\System32\tar.exe"
 
-if not exist "%~dp0..\Production" mkdir "%~dp0..\Production" >nul 2>&1
+if not exist "%PROD%" mkdir "%PROD%" >nul 2>&1
 
 if exist "%STAGE%" rmdir /s /q "%STAGE%"
 mkdir "%STAGE%" || (

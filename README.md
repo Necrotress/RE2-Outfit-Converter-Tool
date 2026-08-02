@@ -84,15 +84,17 @@ Notes:
 
 ## Layout
 
-This folder (`Source/`) is the git repository root. Sibling folders next to it:
+This directory is the git repository root (clone and work here). Pack scripts
+write **inside the clone** so contributors do not need sibling folders:
 
 | Folder | Purpose |
 |--------|---------|
-| `Source/` | Application source, tests, docs, pack scripts (this tree) |
-| `Build/` | Local Windows GUI build + shortcuts (day-to-day testing) |
-| `Production/` | Final Windows/Linux release copies from pack scripts |
+| `build/` | Local Windows GUI build (PyInstaller work + test exe; gitignored) |
+| `release/` | Windows/Linux pack output + Nexus zips (gitignored) |
 
-Shortcuts live in `Build/`. Run `rebuild.bat` from here to refresh the test app.
+Optional overrides (absolute paths): `RE2OC_BUILD_DIR`, `RE2OC_RELEASE_DIR`.
+
+Run `rebuild.bat` from the repo root to refresh the test app under `build/`.
 
 ## Run from source
 
@@ -172,21 +174,18 @@ pytest
 
 ### Local / folder build (test copy)
 
-From this `Source/` folder, run `rebuild.bat` (or the Rebuild shortcut in
-`../Build/`). That installs dependencies, builds into `../Build/dist`, and syncs
-the runnable app to `../Build/RE2 Outfit Converter/`.
+From the repo root, run `rebuild.bat`. That installs dependencies if needed,
+builds into `build/dist/`, and syncs the runnable app to
+`build/RE2 Outfit Converter/`.
 
 Manual equivalent:
 
 ```
 pip install -r requirements.txt pyinstaller
-python -m PyInstaller --noconfirm --workpath ../Build/pyi-work --distpath ../Build/dist "RE2 Outfit Converter.spec"
+python -m PyInstaller --noconfirm --workpath build/pyi-work --distpath build/dist "RE2 Outfit Converter.spec"
 ```
 
-Then sync `../Build/dist/RE2 Outfit Converter/` to `../Build/RE2 Outfit Converter/`.
-
-On Windows, avoid letting PyInstaller use a default `build\` work folder named
-the same as `Build\` (case-insensitive collision).
+Then sync `build/dist/RE2 Outfit Converter/` to `build/RE2 Outfit Converter/`.
 
 ### Production package
 
@@ -194,13 +193,13 @@ the same as `Build\` (case-insensitive collision).
 pack-windows.bat
 ```
 
-Writes under `../Production/` and a Nexus zip
-`RE2.Outfit.Converter.v1.1.8.Windows.zip` (folder build: exe + `_internal`).
+Writes `release/RE2 Outfit Converter/` and
+`release/RE2.Outfit.Converter.v1.1.8.Windows.zip` (folder build: exe + `_internal`).
 
 ## Build the Linux package
 
-From this `Source/` folder on Windows, run `pack-linux.bat`. That stages the GUI
+From the repo root on Windows, run `pack-linux.bat`. That stages the GUI
 scripts, `main.py`, `requirements-linux.txt`, and `re2_outfit_converter/`, then
-writes the Linux zip under `../Production/`.
+writes `release/RE2.Outfit.Converter.v1.1.8.Linux.zip`.
 
 On Linux: extract, `chmod +x run.sh`, `./run.sh`.

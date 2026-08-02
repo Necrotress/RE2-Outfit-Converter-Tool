@@ -2,12 +2,13 @@
 setlocal EnableExtensions
 cd /d "%~dp0"
 
-rem Production Windows pack: onedir build -> ..\Production + versioned Nexus zip.
+rem Production Windows pack: onedir build -> .\release\ + versioned zip (in-repo).
+rem Override: set RE2OC_BUILD_DIR / RE2OC_RELEASE_DIR before running.
 
-set "ROOT=%~dp0"
-for %%I in ("%ROOT%..\Production") do set "PROD=%%~fI"
-for %%I in ("%ROOT%..\Build") do set "BUILD=%%~fI"
-for %%I in ("%ROOT%..\..") do set "ZIPDIR=%%~fI"
+if not defined RE2OC_BUILD_DIR set "RE2OC_BUILD_DIR=%~dp0build"
+if not defined RE2OC_RELEASE_DIR set "RE2OC_RELEASE_DIR=%~dp0release"
+for %%I in ("%RE2OC_BUILD_DIR%") do set "BUILD=%%~fI"
+for %%I in ("%RE2OC_RELEASE_DIR%") do set "PROD=%%~fI"
 set "APPNAME=RE2 Outfit Converter"
 set "VER=1.1.8"
 set "ZIPNAME=RE2.Outfit.Converter.v%VER%.Windows.zip"
@@ -18,6 +19,8 @@ set "BUILT_DIR=%DIST%\%APPNAME%"
 set "BUILT_EXE=%BUILT_DIR%\%APPNAME%.exe"
 
 echo === RE2 Outfit Converter - Windows production pack (onedir) ===
+echo Build:   %BUILD%
+echo Release: %PROD%
 echo.
 
 where python >nul 2>&1
@@ -39,7 +42,7 @@ if errorlevel 1 (
   echo PyInstaller OK.
 )
 
-echo [2/4] Building onedir app into Build\...
+echo [2/4] Building onedir app...
 if not exist "%BUILD%" mkdir "%BUILD%" >nul 2>&1
 python -m PyInstaller --noconfirm --workpath "%WORK%" --distpath "%DIST%" "RE2 Outfit Converter.spec"
 if errorlevel 1 (
@@ -54,32 +57,35 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [3/4] Staging Production folder...
-if exist "%PROD%" rmdir /S /Q "%PROD%"
-if errorlevel 1 (
-  echo ERROR: Could not clear Production. Close RE2 Outfit Converter.exe and retry.
-  exit /b 1
+echo [3/4] Staging release folder...
+if not exist "%PROD%" mkdir "%PROD%" >nul 2>&1
+if exist "%PROD%\%APPNAME%" (
+  rmdir /S /Q "%PROD%\%APPNAME%"
+  if errorlevel 1 (
+    echo ERROR: Could not clear release app folder. Close %APPNAME%.exe and retry.
+    exit /b 1
+  )
 )
-mkdir "%PROD%" >nul 2>&1
-robocopy "%BUILT_DIR%" "%PROD%" /E /NFL /NDL /NJH /NJS /nc /ns /np >nul
+mkdir "%PROD%\%APPNAME%" >nul 2>&1
+robocopy "%BUILT_DIR%" "%PROD%\%APPNAME%" /E /NFL /NDL /NJH /NJS /nc /ns /np >nul
 if errorlevel 8 (
-  echo ERROR: Failed to stage production folder.
+  echo ERROR: Failed to stage release folder.
   exit /b 1
 )
-copy /Y "USER GUIDE.txt" "%PROD%\USER GUIDE.txt" >nul
-if exist "LICENSE" copy /Y "LICENSE" "%PROD%\LICENSE.txt" >nul
+copy /Y "USER GUIDE.txt" "%PROD%\%APPNAME%\USER GUIDE.txt" >nul
+if exist "LICENSE" copy /Y "LICENSE" "%PROD%\%APPNAME%\LICENSE.txt" >nul
 
 echo [4/4] Writing Nexus zip...
 if exist "%STAGE%" rmdir /S /Q "%STAGE%"
 mkdir "%STAGE%\%APPNAME%" >nul 2>&1
-robocopy "%PROD%" "%STAGE%\%APPNAME%" /E /NFL /NDL /NJH /NJS /nc /ns /np >nul
+robocopy "%PROD%\%APPNAME%" "%STAGE%\%APPNAME%" /E /NFL /NDL /NJH /NJS /nc /ns /np >nul
 if errorlevel 8 (
   echo ERROR: Failed to stage zip tree.
   exit /b 1
 )
 
-if exist "%ZIPDIR%\%ZIPNAME%" del /F /Q "%ZIPDIR%\%ZIPNAME%"
-powershell -NoProfile -Command "Compress-Archive -Path (Join-Path $env:TEMP 'RE2-Outfit-Converter-Windows-pack\*') -DestinationPath '%ZIPDIR%\%ZIPNAME%' -Force"
+if exist "%PROD%\%ZIPNAME%" del /F /Q "%PROD%\%ZIPNAME%"
+powershell -NoProfile -Command "Compress-Archive -Path (Join-Path $env:TEMP 'RE2-Outfit-Converter-Windows-pack\*') -DestinationPath '%PROD%\%ZIPNAME%' -Force"
 if errorlevel 1 (
   echo ERROR: Failed to create zip.
   exit /b 1
@@ -89,7 +95,7 @@ rmdir /S /Q "%STAGE%" 2>nul
 
 echo.
 echo DONE - extract the zip, then run %APPNAME%.exe inside the folder.
-echo   Folder: %PROD%
-echo   Zip:    %ZIPDIR%\%ZIPNAME%
+echo   Folder: %PROD%\%APPNAME%
+echo   Zip:    %PROD%\%ZIPNAME%
 echo.
 exit /b 0

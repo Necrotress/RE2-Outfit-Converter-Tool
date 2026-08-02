@@ -5,6 +5,14 @@ All notable changes to **RE2 Remake Outfit Converter** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- `rebuild.bat` / `pack-windows.bat` / `pack-linux.bat` write under in-repo
+  `build/` and `release/` (clone-friendly). Optional `RE2OC_BUILD_DIR` /
+  `RE2OC_RELEASE_DIR` overrides. Docs updated.
+
 ## [1.1.8] — 2026-08-01
 
 Public release since **1.1.0**. Includes pipeline, GUI, and packaging work that
@@ -38,9 +46,8 @@ landed after that release (formerly tracked as 1.1.5 / 1.1.6 / unreleased).
 - **GUI-only product:** CLI module, `python -m` entry, `convert.sh` /
   `menu.sh`, and CLI docs/tests removed. Windows and Linux ship the
   CustomTkinter GUI only.
-- Repo layout: `Source/` is the git root; sibling `Build/` is the local
-  test exe; `Production/` is pack output. `rebuild.bat` /
-  `pack-windows.bat` build into `Build/` work dirs.
+- Repo layout documented for local packaging; pack scripts later moved to
+  in-repo `build/` + `release/` (see Unreleased).
 - Convert-time "Set in-game outfit name" is **Elza / Noir / Military** only.
   Jacket / Tank / Classic* hint to use **Costume names** instead; convert
   no longer ships the shared costume MSG renames.
