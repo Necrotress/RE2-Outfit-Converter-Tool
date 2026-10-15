@@ -67,6 +67,49 @@ def test_isolate_shared_and_exclusive_together(tmp_path: Path):
     )
 
 
+def test_texture_only_hair_keeps_vanilla_material_names(tmp_path: Path):
+    """No mesh: material tokens stay on the pak hair id for every costume."""
+    staging = tmp_path
+    hair = staging / MESH_ROOTS[0] / "pl1070"
+    hair.mkdir(parents=True)
+    (hair / "pl1070.mdf2.10").write_bytes(_u16("pl1070_Hair_Mat"))
+    (hair / "pl1070_hair_alba.tex.10").write_bytes(b"BLONDE")
+    rename_map: dict[str, str] = {}
+    report = ConversionReport()
+    isolate_claire_face_hair(
+        staging,
+        AnalysisResult(root=staging, modinfo=ModInfo(name="TexHair")),
+        CLAIRE_OUTFIT_BY_KEY["elza"],
+        CLAIRE_OUTFIT_BY_KEY["jacket"],
+        rename_map,
+        report,
+    )
+    assert "pl1070_Hair_Mat" not in rename_map
+    assert "pl1070_Hair2_Mat" not in rename_map
+    assert "pl1070_Hair3_Mat" not in rename_map
+    assert any("hair_alba" in f"{old} {new}".lower() for old, new in rename_map.items())
+
+
+def test_hair_mesh_still_renames_its_material_tokens(tmp_path: Path):
+    staging = tmp_path
+    hair = staging / MESH_ROOTS[0] / "pl1070"
+    hair.mkdir(parents=True)
+    (hair / "pl1070.mesh.1").write_bytes(b"mesh")
+    (hair / "pl1070.mdf2.10").write_bytes(_u16("pl1070_Hair_Mat"))
+    rename_map: dict[str, str] = {}
+    report = ConversionReport()
+    isolate_claire_face_hair(
+        staging,
+        AnalysisResult(root=staging, modinfo=ModInfo(name="MeshHair")),
+        CLAIRE_OUTFIT_BY_KEY["elza"],
+        CLAIRE_OUTFIT_BY_KEY["jacket"],
+        rename_map,
+        report,
+    )
+    assert rename_map.get("pl1070_Hair_Mat", "").endswith("_Hair_Mat")
+    assert rename_map["pl1070_Hair_Mat"] != "pl1070_Hair_Mat"
+
+
 def test_resolve_hair_does_not_crosswire_exclusives(tmp_path: Path):
     staging = tmp_path
     hat = staging / MESH_ROOTS[0] / "pl1075"

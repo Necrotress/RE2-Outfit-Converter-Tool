@@ -8,6 +8,7 @@ from re2_outfit_converter.analyzer import AnalysisResult
 from re2_outfit_converter.gui_analysis import (
     format_multi_outfit_row,
     format_outfit_row,
+    is_game_build_load,
 )
 from re2_outfit_converter.outfits import CLAIRE_OUTFIT_BY_KEY
 
@@ -83,3 +84,22 @@ def test_multi_outfit_row():
     assert ok
     assert text.startswith("Tank Top")
     assert "1 addon" in text
+
+
+def test_outfit_row_names_who_a_non_outfit_mod_affects():
+    analysis = _analysis(characters={"Sherry": 8, "Ada": 2})
+    text, ok = format_outfit_row(analysis)
+    assert ok
+    assert text == "Ada, Sherry"
+
+
+def test_game_build_layout_follows_the_loaded_mod():
+    sherry = _analysis(characters={"Sherry": 4})
+    claire = _analysis(
+        claire_outfits=[CLAIRE_OUTFIT_BY_KEY["jacket"]],
+        characters={"Claire": 3},
+    )
+    assert is_game_build_load([sherry])
+    assert not is_game_build_load([claire])
+    assert not is_game_build_load([])
+    assert not is_game_build_load([sherry, claire])

@@ -79,6 +79,46 @@ def test_map_and_delete(tmp_path: Path):
     assert not (mesh / "pl1001").exists()
 
 
+def test_promoted_deleted_body_is_renamed_not_purged(tmp_path: Path):
+    """Jacket prefab + Tank mesh: deleting Tank must not throw the mesh away."""
+    from re2_outfit_converter.paths import MESH_ROOTS, PARTS_DIR
+
+    from tests.fixtures import write_modinfo
+
+    root = tmp_path / "promo"
+    parts = root / PARTS_DIR
+    parts.mkdir(parents=True)
+    (parts / "pl1000_body_default.pfb.16").write_bytes(b"jacket")
+    (parts / "pl1000_body_costume_3.pfb.16").write_bytes(b"tank")
+    tank = root / MESH_ROOTS[0] / "pl1001"
+    tank.mkdir(parents=True)
+    (tank / "pl1001.mesh.1").write_bytes(b"TANK")
+    write_modinfo(root, Name="Promo")
+    out = tmp_path / "out"
+    out.mkdir()
+    jacket = CLAIRE_OUTFIT_BY_KEY["jacket"]
+    tanktop = CLAIRE_OUTFIT_BY_KEY["tanktop"]
+    noir = CLAIRE_OUTFIT_BY_KEY["noir"]
+    report = convert_with_ops(
+        analyze(root),
+        [
+            OutfitOp(source=tanktop, target=None),
+            OutfitOp(source=jacket, target=noir),
+        ],
+        out,
+        as_folder=True,
+        folder_name="PromoNoir",
+        tag_output=False,
+        write_log=False,
+    )
+    folder = report.output_folder
+    assert folder is not None
+    mesh = folder / MESH_ROOTS[0] / "pl1005" / "pl1005.mesh.1"
+    assert mesh.read_bytes() == b"TANK"
+    assert not (folder / MESH_ROOTS[0] / "pl1000").exists()
+    assert not (folder / MESH_ROOTS[0] / "pl1001").exists()
+
+
 def test_two_maps_different_targets(tmp_path: Path):
     root = build_elza_full(tmp_path)
     # Add a Tank slot alongside Elza so we have two convert sources.
@@ -117,8 +157,11 @@ def test_two_maps_different_targets(tmp_path: Path):
     # Per-target exclusive hair hide must inject redirects for both slots.
     assert (parts / "pl1000_hair_costume_a.pfb.16").is_file()
     assert (parts / "pl1000_hair_costume_b.pfb.16").is_file()
-    # Multi-target MSG sync must keep both clairecos files (not last-wins).
-    from re2_outfit_converter.msg_name import MSG_DIR_DLC
+    # Elza's name follows Elza → Noir. Tank Top has no DLC name file, so
+    # Military must not inherit "E2E Rich Girl".
+    from re2_outfit_converter.msg_name import MSG_DIR_DLC, read_english_name
     msg = folder / MSG_DIR_DLC
-    assert (msg / "mes_sys_clairecos_noir.msg.14").is_file()
-    assert (msg / "mes_sys_clairecos_military.msg.14").is_file()
+    noir_msg = msg / "mes_sys_clairecos_noir.msg.14"
+    assert noir_msg.is_file()
+    assert read_english_name(noir_msg) == "E2E Rich Girl"
+    assert not (msg / "mes_sys_clairecos_military.msg.14").exists()

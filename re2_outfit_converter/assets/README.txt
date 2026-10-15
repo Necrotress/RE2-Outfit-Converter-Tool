@@ -11,3 +11,7 @@ Bundled converter assets:
 - mes_sys_clairecos_template.msg.14 — fallback (Military) template
 - mes_sys_costume.msg.14 — vanilla costume-select names (Tank / Classic Tank rename)
 - mes_sys_reward.msg.14 — vanilla figure/reward labels (Tank / Classic Tank rename)
+- mes_sys_leoncos_{noir,sheriff}.msg.14 — vanilla Leon DLC name templates
+- mes_sys_leoncos_template.msg.14 — fallback Leon template
+- body_prefab/ — jacket-template body prefabs used when a ray-tracing convert publishes cloth
+- rt_prefab/ — ray-tracing face and hair prefab templates

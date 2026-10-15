@@ -43,8 +43,10 @@ Production/
 
 # Local / runtime (GUI settings, convert output, shortcuts)
 Output/
+_tmp_*
 _tmp_*/
 _backup_*/
+_tools/
 settings.json
 settings.json.bak
 *.lnk
@@ -81,7 +83,6 @@ Mods/
 .agent/
 
 # Local extract / pack / debug junk
-_tools/
 _stars_inspect/
 _inspect*/
 _DELETE_ME*/

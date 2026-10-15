@@ -5,7 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable, Sequence
 
-from .converter import BatchItem, convert, convert_batch, convert_with_ops
+from .converter import (
+    BatchItem,
+    convert,
+    convert_batch,
+    convert_game_build,
+    convert_with_ops,
+)
 from .outfit_ops import OutfitOp
 from .packaging import input_base_name
 from .reports import ConversionError
@@ -34,6 +40,12 @@ def convert_loaded(
     ops: Sequence[OutfitOp] | None = None,
     write_log: bool = True,
     outfit_display_names: dict[str, str] | None = None,
+    tag_modinfo_description: bool | None = None,
+    tag_modinfo_name: bool = False,
+    game_build: str | None = None,
+    tag_build_zip_name: bool = True,
+    tag_build_modinfo_description: bool = True,
+    settings: dict | None = None,
 ):
     """Run single or batch convert. Raises ConversionError / OSError."""
     if len(loaded) == 1:
@@ -49,6 +61,12 @@ def convert_loaded(
                 source_name=input_base_name(item.source.original),
                 write_log=write_log,
                 outfit_display_names=outfit_display_names,
+                tag_modinfo_description=tag_modinfo_description,
+                tag_modinfo_name=tag_modinfo_name,
+                game_build=game_build,
+                tag_build_zip_name=tag_build_zip_name,
+                tag_build_modinfo_description=tag_build_modinfo_description,
+                settings=settings,
             )
         return convert(
             item.analysis, source_outfit, target_outfit, out_path,
@@ -60,6 +78,12 @@ def convert_loaded(
             source_name=input_base_name(item.source.original),
             write_log=write_log,
             outfit_display_names=outfit_display_names,
+            tag_modinfo_description=tag_modinfo_description,
+            tag_modinfo_name=tag_modinfo_name,
+            game_build=game_build,
+            tag_build_zip_name=tag_build_zip_name,
+            tag_build_modinfo_description=tag_build_modinfo_description,
+            settings=settings,
         )
     items = [
         BatchItem(
@@ -79,8 +103,48 @@ def convert_loaded(
         ops=ops,
         write_log=write_log,
         outfit_display_names=outfit_display_names,
+        tag_modinfo_description=tag_modinfo_description,
+        tag_modinfo_name=tag_modinfo_name,
+        game_build=game_build,
+        tag_build_zip_name=tag_build_zip_name,
+        tag_build_modinfo_description=tag_build_modinfo_description,
+        settings=settings,
+    )
+
+
+def convert_game_builds(
+    loaded,
+    out_path: Path,
+    *,
+    game_build: str,
+    bundle_name: str,
+    progress: Callable[[str], None] | None = None,
+    write_log: bool = True,
+    tag_build_zip_name: bool = True,
+    tag_build_modinfo_description: bool = True,
+    settings: dict | None = None,
+):
+    """Platform-only convert for the Game build screen."""
+    if not loaded:
+        raise ConversionError("No mods loaded.")
+    analyses = [item.analysis for item in loaded]
+    source_name = None
+    if len(loaded) == 1:
+        source_name = input_base_name(loaded[0].source.original)
+    return convert_game_build(
+        analyses, out_path,
+        game_build=game_build,
+        progress=progress,
+        source_name=source_name,
+        bundle_name=bundle_name,
+        write_log=write_log,
+        tag_build_zip_name=tag_build_zip_name,
+        tag_build_modinfo_description=tag_build_modinfo_description,
+        settings=settings,
     )
 
 
 # Re-export for callers that want typed errors.
-__all__ = ["analyze_paths", "convert_loaded", "ConversionError"]
+__all__ = [
+    "analyze_paths", "convert_loaded", "convert_game_builds", "ConversionError",
+]

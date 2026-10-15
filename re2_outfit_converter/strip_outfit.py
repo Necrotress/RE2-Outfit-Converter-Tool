@@ -1,4 +1,4 @@
-"""Strip a Claire outfit slot from a staged mod (Delete action)."""
+"""Strip an outfit slot from a staged mod (Delete action)."""
 
 from __future__ import annotations
 
@@ -6,9 +6,9 @@ import shutil
 from pathlib import Path
 
 from .costume_ui import UI_ROOT, _iter_ui_files
-from .msg_name import CLAIRECOS_MSG_STEMS, MSG_DIR_DLC
+from .msg_name import DLC_COS_MSG_STEMS, MSG_DIR_DLC, _cos_dest_name
 from .outfits import EXCLUSIVE_PART_IDS, Outfit
-from .paths import MESH_ROOTS, PARTS_DIR, resolve_ci
+from .paths import mesh_roots, parts_dir, resolve_ci
 from .reports import ConversionReport
 
 
@@ -19,12 +19,7 @@ def strip_outfit_slot(
     *,
     keep_exclusive_ids: set[str] | None = None,
 ) -> None:
-    """Remove PFB / body mesh / costume UI / outfit MSG for ``outfit``.
-
-    Exclusive hair/hat folders (``pl1071`` / ``pl1075``) are removed when this
-    outfit owns them and they are not in ``keep_exclusive_ids`` (another
-    convert target still needs that hat on its vanilla ID).
-    """
+    """Remove PFB / body mesh / costume UI / outfit MSG for ``outfit``."""
     _strip_pfbs(staging, outfit, report)
     _strip_body_meshes(staging, outfit, report)
     _strip_exclusive_hair(
@@ -35,12 +30,14 @@ def strip_outfit_slot(
 
 
 def _strip_pfbs(staging: Path, outfit: Outfit, report: ConversionReport) -> None:
-    parts = resolve_ci(staging, PARTS_DIR)
+    profile = outfit.profile
+    parts = resolve_ci(staging, parts_dir(profile))
     if parts is None or not parts.is_dir():
         return
+    root = profile.player_root
     for slot in outfit.all_slots:
         for part in ("body", "face", "hair"):
-            for path in list(parts.glob(f"pl1000_{part}_{slot}.pfb*")):
+            for path in list(parts.glob(f"{root}_{part}_{slot}.pfb*")):
                 if not path.is_file():
                     continue
                 rel = path.relative_to(staging).as_posix()
@@ -52,7 +49,7 @@ def _strip_body_meshes(
     staging: Path, outfit: Outfit, report: ConversionReport,
 ) -> None:
     body_id = outfit.body_id.lower()
-    for root in MESH_ROOTS:
+    for root in mesh_roots(outfit.profile):
         root_dir = resolve_ci(staging, root)
         if root_dir is None or not root_dir.is_dir():
             continue
@@ -86,7 +83,7 @@ def _strip_exclusive_hair(
     keep = {x.lower() for x in (keep_exclusive_ids or set())}
     if hair_id in keep:
         return
-    for root in MESH_ROOTS:
+    for root in mesh_roots(outfit.profile):
         root_dir = resolve_ci(staging, root)
         if root_dir is None or not root_dir.is_dir():
             continue
@@ -115,7 +112,9 @@ def _strip_costume_ui(
     ui_root = resolve_ci(staging, UI_ROOT)
     if ui_root is None or not ui_root.is_dir():
         return
-    for path in _iter_ui_files(ui_root, outfit.ui_id):
+    for path in _iter_ui_files(
+        ui_root, outfit.ui_id, ui_row=outfit.profile.ui_row,
+    ):
         rel = path.relative_to(staging).as_posix()
         path.unlink(missing_ok=True)
         report.removed_ops.append(rel)
@@ -127,15 +126,18 @@ def _strip_outfit_msg(
     stem = outfit.msg_stem
     if not stem:
         return
-    # Only strip DLC clairecos files. Tank/Classic Tank share mes_sys_costume
-    # + reward — removing them would fight sibling slots still in the pack.
-    if stem not in CLAIRECOS_MSG_STEMS:
+    # Only strip DLC clairecos/leoncos files. Base slots use the name pack.
+    if stem not in DLC_COS_MSG_STEMS:
         return
     parent = resolve_ci(staging, MSG_DIR_DLC)
     if parent is None or not parent.is_dir():
         return
-    for path in parent.glob(f"mes_sys_clairecos_{stem}.msg*"):
+    dest = _cos_dest_name(stem)
+    base = dest.split(".msg")[0].lower()
+    for path in parent.iterdir():
         if not path.is_file():
+            continue
+        if not path.name.lower().startswith(base):
             continue
         rel = path.relative_to(staging).as_posix()
         path.unlink(missing_ok=True)

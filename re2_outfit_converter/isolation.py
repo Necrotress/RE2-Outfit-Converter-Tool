@@ -7,28 +7,92 @@ import re
 from pathlib import Path
 
 from .analyzer import AnalysisResult
+from .character import CLAIRE_PROFILE, CharacterProfile
 from .outfits import (
     CLAIRE_FACE_IDS,
-    CLAIRE_HAIR_MESH_IDS,
     CLAIRE_OUTFIT_BY_BODY_ID,
     CLAIRE_SHARED_IDS,
     EXCLUSIVE_PART_IDS,
+    LEON_FACE_IDS,
+    LEON_OUTFIT_BY_BODY_ID,
+    LEON_SHARED_IDS,
     RESERVED_MESH_IDS,
     Outfit,
 )
-from .paths import MESH_ROOTS, engine_path, resolve_ci
+from .paths import engine_dir, engine_path, mesh_roots, resolve_ci
 from .reports import ConversionError, ConversionReport
 
 
-def staging_mesh_ids(staging: Path) -> set[str]:
-    """Collect pl1xxx folder/file stems present under mesh roots."""
+_DISABLED_HAIR_DIR_RE = re.compile(r"^_+(pl[0-9]\d{3})$", re.IGNORECASE)
+
+
+def promote_disabled_hair_folders(
+    staging: Path,
+    profile: CharacterProfile | None,
+    report: ConversionReport,
+) -> None:
+    """Drop a leading ``_`` on a hair folder the author disabled.
+
+    CR-AW stores the outfit's hair as ``_pl1070`` so it does not replace
+    vanilla ``pl1070`` for every other costume. The mesh is still the
+    mod's hair. Isolation can only see ``pl1070``.
+    """
+    if profile is None:
+        profile = CLAIRE_PROFILE
+    hair_ids = {mid.lower() for mid in profile.hair_mesh_ids}
+    for root in mesh_roots(profile):
+        root_dir = resolve_ci(staging, root)
+        if root_dir is None:
+            continue
+        for entry in list(root_dir.iterdir()):
+            if not entry.is_dir():
+                continue
+            match = _DISABLED_HAIR_DIR_RE.match(entry.name)
+            if match is None:
+                continue
+            hair_id = match.group(1).lower()
+            if hair_id not in hair_ids:
+                continue
+            if resolve_ci(staging, f"{root}/{hair_id}") is not None:
+                report.warnings.append(
+                    f"left {entry.name} alone ({hair_id} already exists)"
+                )
+                continue
+            dest = entry.with_name(hair_id)
+            entry.rename(dest)
+            report.rename_ops.append(
+                f"enabled disabled hair folder {entry.name}/  ->  {hair_id}/"
+            )
+
+
+def _isolated_folder_has_mesh(
+    staging: Path,
+    folder_id: str,
+    profile: CharacterProfile | None,
+) -> bool:
+    """True when the isolated hair folder shipped a .mesh file."""
+    for root in mesh_roots(profile):
+        folder = resolve_ci(staging, f"{root}/{folder_id}")
+        if folder is None or not folder.is_dir():
+            continue
+        for path in folder.iterdir():
+            if path.is_file() and ".mesh" in path.name.lower():
+                return True
+    return False
+
+
+def staging_mesh_ids(
+    staging: Path,
+    profile: CharacterProfile | None = None,
+) -> set[str]:
+    """Collect plXXXX folder/file stems present under mesh roots."""
     found: set[str] = set()
-    for root in MESH_ROOTS:
+    for root in mesh_roots(profile):
         root_dir = resolve_ci(staging, root)
         if root_dir is None:
             continue
         for entry in root_dir.iterdir():
-            m = re.match(r"(pl1\d{3})", entry.name, re.IGNORECASE)
+            m = re.match(r"(pl[0-9]\d{3})", entry.name, re.IGNORECASE)
             if m:
                 found.add(m.group(1).lower())
     return found
@@ -78,11 +142,15 @@ def allocate_extra_private_id(
         f"Could not allocate a free private mesh ID for {purpose} "
         "(pl1800–pl1899)."
     )
+
+
 def pick_present_id(present: set[str], preferred: list[str]) -> str | None:
     for pid in preferred:
         if pid in present:
             return pid
     return None
+
+
 def isolation_seed(analysis: AnalysisResult) -> str:
     """Stable seed so AddonFor packages share the main mod's private IDs."""
     info = analysis.modinfo
@@ -104,8 +172,10 @@ def isolate_claire_face_hair(
 ) -> tuple[str, str]:
     """Move shared face/hair onto private IDs; handle exclusive hats carefully.
 
-    Shared ``pl1050`` / ``pl1070`` are always isolated so converted mods do not
-    fight other Fluffy Claire packs.
+    Shared ``pl1050`` / ``pl1070`` are isolated so converted mods do not
+    fight other Fluffy Claire packs. ``pl1050.mesh`` is the head and neck
+    for Military, Jacket, Tank Top, Noir, and both Classics. A custom head
+    left on that file replaces the neck on all of them.
 
     Exclusive ``pl1071`` / ``pl1075``:
     - Kept on their vanilla ID when converting *into* that same exclusive slot
@@ -126,8 +196,20 @@ def isolate_claire_face_hair(
     prefers custom → isolated shared → isolated exclusive → kept exclusive.
     Use :func:`resolve_hair_id_for_target` to pick the redirect ID per outfit.
     """
+    profile = (
+        analysis.profile
+        or target.profile
+        or source.profile
+        or CLAIRE_PROFILE
+    )
+    roots = mesh_roots(profile)
+    face_ids = profile.face_ids
+    exclusive_ids = profile.exclusive_part_ids
+    shared_hair = profile.default_hair_id
+
     seed = isolation_seed(analysis)
-    present = staging_mesh_ids(staging)
+    promote_disabled_hair_folders(staging, profile, report)
+    present = staging_mesh_ids(staging, profile)
     reserved = set(RESERVED_MESH_IDS) | present
     face_priv, hair_priv = allocate_private_ids(seed, reserved)
     keep_excl = keep_exclusive_ids if keep_exclusive_ids is not None else {
@@ -136,18 +218,18 @@ def isolate_claire_face_hair(
 
     face_src = pick_present_id(
         present,
-        [source.head_id, target.head_id, *sorted(CLAIRE_FACE_IDS)],
+        [source.head_id, target.head_id, *sorted(face_ids)],
     )
 
     face_out = face_priv
     if face_src and face_src != face_priv:
-        for root in MESH_ROOTS:
+        for root in roots:
             root_dir = resolve_ci(staging, root)
             if root_dir is not None:
                 rename_entries(
                     root_dir, staging, face_src, face_priv, rename_map, report)
         alias_standard_mesh_paths(
-            staging, face_src, face_priv, rename_map, report)
+            staging, face_src, face_priv, rename_map, report, profile=profile)
         report.rename_ops.append(
             f"isolated face {face_src}  ->  {face_priv}")
     elif face_src:
@@ -159,7 +241,7 @@ def isolate_claire_face_hair(
     isolated_shared: str | None = None
 
     # Keep exclusives that convert targets still need on vanilla IDs.
-    for excl in sorted(EXCLUSIVE_PART_IDS):
+    for excl in sorted(exclusive_ids):
         if excl in present and excl in keep_excl:
             report.rename_ops.append(
                 f"kept exclusive hair {excl} "
@@ -168,24 +250,24 @@ def isolate_claire_face_hair(
             kept_exclusives.append(excl)
 
     # Isolate exclusives not kept (convert-away / Delete leftover risk).
-    for excl in sorted(EXCLUSIVE_PART_IDS):
+    for excl in sorted(exclusive_ids):
         if excl not in present or excl in keep_excl:
             continue
         dest = (
             hair_priv if isolated_exclusive is None and isolated_shared is None
             else allocate_extra_private_id(seed, reserved, f"excl-{excl}")
         )
-        for root in MESH_ROOTS:
+        for root in roots:
             root_dir = resolve_ci(staging, root)
             if root_dir is not None:
                 rename_entries(
                     root_dir, staging, excl, dest, rename_map,
                     report, remap_materials=False)
         alias_standard_mesh_paths(
-            staging, excl, dest, rename_map, report)
+            staging, excl, dest, rename_map, report, profile=profile)
         from .exclusive_mdf import ensure_private_exclusive_mdf
         ensure_private_exclusive_mdf(
-            staging, dest, excl, rename_map, report)
+            staging, dest, excl, rename_map, report, profile=profile)
         report.rename_ops.append(
             f"isolated exclusive hair {excl}  ->  {dest} "
             f"(source slot stays vanilla; private mdf for textures)"
@@ -195,23 +277,33 @@ def isolate_claire_face_hair(
         present.discard(excl)
         present.add(dest)
 
-    # Always isolate shared pl1070 when present (do not skip after exclusives).
-    if "pl1070" in present:
+    # Always isolate shared default hair when present.
+    if shared_hair in present:
         dest = (
             hair_priv
             if isolated_exclusive is None and isolated_shared is None
-            else allocate_extra_private_id(seed, reserved, "shared-pl1070")
+            else allocate_extra_private_id(
+                seed, reserved, f"shared-{shared_hair}")
         )
-        for root in MESH_ROOTS:
+        for root in roots:
             root_dir = resolve_ci(staging, root)
             if root_dir is not None:
                 rename_entries(
-                    root_dir, staging, "pl1070", dest, rename_map, report)
+                    root_dir, staging, shared_hair, dest, rename_map, report)
         alias_standard_mesh_paths(
-            staging, "pl1070", dest, rename_map, report)
-        report.rename_ops.append(f"isolated hair pl1070  ->  {dest}")
+            staging, shared_hair, dest, rename_map, report, profile=profile)
+        # A real hair mesh is renamed onto the private id, so its material
+        # names have to follow. Texture-only hair keeps the pak mesh, which
+        # still binds pl1070_Hair_Mat. Renaming those tokens leaves the hash
+        # behind and the hair draws invisible on every costume.
+        if _isolated_folder_has_mesh(staging, dest, profile):
+            register_known_mat_aliases(
+                shared_hair, dest, rename_map,
+                suffixes=("Hair_Mat", "Hair2_Mat", "Hair3_Mat"),
+            )
+        report.rename_ops.append(f"isolated hair {shared_hair}  ->  {dest}")
         isolated_shared = dest
-        present.discard("pl1070")
+        present.discard(shared_hair)
         present.add(dest)
 
     if custom_hair and is_stable_custom_mesh_id(custom_hair):
@@ -248,7 +340,7 @@ def resolve_hair_id_for_target(
     exclusive slot (Military ``pl1071``). Prefers the target's own kept
     exclusive, then shared/custom ``primary_hair``.
     """
-    present = staging_mesh_ids(staging)
+    present = staging_mesh_ids(staging, target.profile)
     tid = target.hair_id
     if tid in EXCLUSIVE_PART_IDS and tid in present:
         return tid
@@ -264,13 +356,15 @@ def resolve_hair_id_for_target(
 
 
 def is_stable_custom_mesh_id(mesh_id: str) -> bool:
-    """True for non-vanilla Claire mesh folders already safe to leave private."""
+    """True for non-vanilla mesh folders already safe to leave private."""
     mid = mesh_id.lower()
     if mid in CLAIRE_SHARED_IDS or mid in CLAIRE_FACE_IDS:
         return False
-    if mid in CLAIRE_OUTFIT_BY_BODY_ID:
+    if mid in LEON_SHARED_IDS or mid in LEON_FACE_IDS:
         return False
-    return bool(re.fullmatch(r"pl1\d{3}", mid))
+    if mid in CLAIRE_OUTFIT_BY_BODY_ID or mid in LEON_OUTFIT_BY_BODY_ID:
+        return False
+    return bool(re.fullmatch(r"pl[0-9]\d{3}", mid))
 
 
 def pick_custom_hair_id(
@@ -281,8 +375,9 @@ def pick_custom_hair_id(
     """Prefer analyzer custom IDs that look like hair kits (not redirect bodies)."""
     _mesh_re = re.compile(r"\.mesh(?:\.\d+)?$", re.IGNORECASE)
 
+    roots = mesh_roots(analysis.profile)
     def _hair_folder(mesh_id: str) -> Path | None:
-        for root in MESH_ROOTS:
+        for root in roots:
             folder = resolve_ci(staging, f"{root}/{mesh_id}")
             if folder is None or not folder.is_dir():
                 continue
@@ -295,7 +390,8 @@ def pick_custom_hair_id(
         return None
 
     ordered: list[str] = []
-    for cid in analysis.claire_custom_ids:
+    custom = analysis.custom_ids or analysis.claire_custom_ids
+    for cid in custom:
         if cid not in ordered:
             ordered.append(cid)
     for mid in sorted(present):
@@ -327,10 +423,15 @@ def isolate_shared_outfit_textures(
     same-length private tokens derived from the face private ID
     (``Pl2020``→``Pl1808``, ``Textures``→``Tex_1808``) and patch mdf2 refs.
 
-    Only remaps files that exist in the mod (no folder-prefix rewrites), and
-    does **not** touch ``sectionroot/character/Textures`` — face materials still
-    need vanilla paths there (e.g. ``pl_Face_BloodMask``). Rewriting those
-    blanks the head and can freeze on outfit switch.
+    Folder renames only move files that exist in the mod. Engine-path aliases
+    for ``Escape/Character/...`` are always registered so AddonFor body
+    ``.mdf2`` overlays (e.g. Apocalypse — ships dirt ``Pl2020`` textures but
+    no ``Textures/`` folder) still remap to the same private paths as the main
+    package. Without that, Fluffy lets the addon's unpatched mdf overwrite the
+    main's ``Tex_XXXX`` binds → invisible body / freeze on outfit switch.
+
+    Does **not** touch ``SectionRoot/Character/Textures`` — face materials
+    still need vanilla paths there (e.g. ``pl_Face_BloodMask``).
     """
     if not face_priv.lower().startswith("pl") or len(face_priv) != 6:
         return
@@ -356,6 +457,17 @@ def isolate_shared_outfit_textures(
         if parent is not None and rename_named_folder(
                 parent, staging, "Textures", textures_new, rename_map, report):
             moved = True
+
+    # Always alias Escape body texture roots (even when folders were absent)
+    # so AddonFor body .mdf2 files patch to the same private paths as Main.
+    escape_pl_old = "Escape/Character/Player/wap100/Pl2020"
+    escape_pl_new = f"Escape/Character/Player/wap100/{pl2020_new}"
+    if len(escape_pl_old) == len(escape_pl_new):
+        rename_map.setdefault(escape_pl_old, escape_pl_new)
+    escape_tex_old = "Escape/Character/Textures"
+    escape_tex_new = f"Escape/Character/{textures_new}"
+    if len(escape_tex_old) == len(escape_tex_new):
+        rename_map.setdefault(escape_tex_old, escape_tex_new)
 
     if moved:
         report.rename_ops.append(
@@ -411,24 +523,28 @@ def alias_standard_mesh_paths(
     new_id: str,
     rename_map: dict[str, str],
     _report: ConversionReport,
+    *,
+    profile: CharacterProfile | None = None,
 ) -> None:
     """Map standard plXXXX.mdf2/mesh/chain paths onto isolated files.
 
     Some mods ship ``--pl1070.mdf2`` while PFBs still reference ``pl1070.mdf2``.
     After isolation, register same-length aliases so injected/converted PFBs
-    load the private assets instead of another mod's shared pl1070.
+    load the private assets instead of another mod's shared hair id.
     """
     if len(old_id) != len(new_id):
         return
-    for root in MESH_ROOTS:
+    profile = profile or CLAIRE_PROFILE
+    player = profile.player_root
+    for root in mesh_roots(profile):
         new_dir = resolve_ci(staging, f"{root}/{new_id}")
         if new_dir is None or not new_dir.is_dir():
             continue
         is_stream = "streaming" in root
         prefix = (
-            "streaming/sectionroot/character/player/pl1000"
+            f"streaming/sectionroot/character/player/{player}"
             if is_stream else
-            "sectionroot/character/player/pl1000"
+            f"sectionroot/character/player/{player}"
         )
         for path in sorted(new_dir.iterdir()):
             if not path.is_file():
@@ -450,7 +566,8 @@ def rename_entries(root_dir: Path, staging: Path, old_id: str, new_id: str,
                     rename_map: dict[str, str],
                     report: ConversionReport,
                     *,
-                    remap_materials: bool = True) -> None:
+                    remap_materials: bool = True,
+                    register_dir_prefix: bool = False) -> None:
     for entry in sorted(root_dir.iterdir()):
         name_low = entry.name.lower()
         if not (name_low == old_id or name_low.startswith(old_id + ".")
@@ -467,6 +584,14 @@ def rename_entries(root_dir: Path, staging: Path, old_id: str, new_id: str,
             originals = [f.relative_to(entry) for f in entry.rglob("*") if f.is_file()]
             entry.rename(dest)
             report.rename_ops.append(f"folder {entry.name}/  ->  {new_name}/")
+            old_dir = engine_dir(entry.relative_to(staging).as_posix())
+            new_dir = engine_dir(dest.relative_to(staging).as_posix())
+            if (
+                register_dir_prefix
+                and old_dir and new_dir and old_dir != new_dir
+                and len(old_dir) == len(new_dir)
+            ):
+                rename_map.setdefault(old_dir, new_dir)
             for rel in sorted(originals):
                 moved = dest / rel
                 final = moved
@@ -517,7 +642,28 @@ def rename_entries(root_dir: Path, staging: Path, old_id: str, new_id: str,
                     dest.parent, old_id, new_id, rename_map)
 
 
-_MESH_MAT_RE = re.compile(rb"pl1\d{3}_[A-Za-z0-9_]+_Mat")
+_MESH_MAT_RE = re.compile(rb"pl[01]\d{3}_[A-Za-z0-9_]+_Mat")
+
+
+def register_known_mat_aliases(
+    old_id: str,
+    new_id: str,
+    rename_map: dict[str, str],
+    *,
+    suffixes: tuple[str, ...],
+) -> int:
+    """Map ``old_id_{suffix}`` → ``new_id_{suffix}`` for fixed material tokens."""
+    if len(old_id) != len(new_id) or old_id == new_id:
+        return 0
+    added = 0
+    for suf in suffixes:
+        old_m = f"{old_id}_{suf}"
+        new_m = f"{new_id}_{suf}"
+        if rename_map.get(old_m) == new_m:
+            continue
+        rename_map[old_m] = new_m
+        added += 1
+    return added
 
 
 def register_material_name_aliases(

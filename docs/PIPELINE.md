@@ -5,6 +5,11 @@ runs focused helpers. Multi-outfit packs use a list of `OutfitOp` (convert
 source→target, or delete with `target=None`). Delete strips PFB / body mesh /
 UI / DLC MSG for that slot before convert ops run.
 
+Claire and Leon share the same stage order. A `CharacterProfile`
+(`character.py`) supplies player root (`pl1000` / `pl0000`), parts/mesh roots,
+face/hair ID sets, costume UI row (`01` / `00`), and figure prefix. Ops in one
+run must be a single character.
+
 Order matters: later steps (especially binary path patching) depend on
 `rename_map` entries built by earlier renames and isolation.
 
@@ -49,16 +54,17 @@ flowchart TD
 | 3 | Body mesh IDs | `meshes.convert_mesh_ids` | Body only; face/hair later |
 | 4 | Purge leftovers | `meshes.purge_source_body_meshes` | When rename skipped (collision) |
 | 5 | Redirect bodies | `meshes.retarget_redirect_bodies` | Nurse / Ghost Witch `pl1008` → target body |
-| 6 | Costume UI | `costume_ui` | Remap `ui0601_01_XX` (incoming art wins on collision), or stash for Classic |
+| 6 | Costume UI | `costume_ui` | Remap `ui0601_{row}_XX` (Claire `01`, Leon `00`; incoming art wins on collision), or stash for Classic |
 | 7 | Streaming sync | `meshes.sync_streaming_meshes` | Mirror sectionroot ↔ streaming |
-| 8 | Exclusive hair | `hair_prefabs.ensure_exclusive_hair_override` | Noir/Military hair PFB redirect |
-| 9 | Face/hair isolation | `isolation.isolate_claire_face_hair` | Private `pl18xx` + `rename_map` |
-| 10 | Isolated hair PFB | `hair_prefabs.ensure_isolated_hair_redirect` | Inject + alias for patch |
-| 11 | Exclusive mesh hide | `exclusive_meshes.ensure_exclusive_part_mesh_hide` | Seed `pl1075`/`pl1071` for costume preview |
-| 12 | Face clean / strip | `military_face.ensure_military_clean_face` | Tank Top: strip Military `*_04` face folders **before** isolation. Military: auto-seed Claire default `pl1050_04` when staging has no face data |
-| 13 | Shared textures | `isolation.isolate_shared_outfit_textures` | CR-AW `Pl2020` / `Textures` |
-| 14 | Costume MSG | `msg_name.sync_costume_names_for_targets` | All convert targets in one pass (keeps sibling clairecos files) |
-| 14b | Figure gallery | `figure_scenes.strip_claire_extra_figures` | Strip author `figurescene` / `figure` ids 10–13 (convert + delete-only) |
+| 8 | Exclusive hair | `hair_prefabs.ensure_exclusive_hair_override` | Claire Noir/Military; Leon Noir/Arklay Sheriff (`pl0074`/`pl0075`) hair PFB redirect |
+| 9 | Face/hair isolation | `isolation.isolate_claire_face_hair` | Private `pl18xx` + `rename_map` (profile face/hair sets) |
+| 10 | Isolated hair PFB | `hair_prefabs.ensure_isolated_hair_redirect` | Inject + alias for patch; detects alphanumeric stems and author chain sidecars; Leon retargets Claire redirect template onto `pl0000`/`pl0070` |
+| 10b | Overlay hair PFBs | `hair_prefabs.drop_mesh_only_hair_pfbs` | Drop `{root}_hair_*.pfb` for overlay hair packs that must not own the redirect: mesh-only, or AddonFor with mesh/mdf but no local `.chain`. Standalone packs without chain still keep a vanilla-chain redirect. |
+| 11 | Exclusive mesh hide | `exclusive_meshes.ensure_exclusive_part_mesh_hide` | **Claire only** — seed `pl1075`/`pl1071` for costume preview |
+| 12 | Face clean / strip | `military_face.ensure_military_clean_face` | **Claire only** — Tank Top strip / Military seed |
+| 13 | Shared textures | `isolation.isolate_shared_outfit_textures` | CR-AW `Pl2020` / `Textures` folders when present; always aliases `Escape/Character/...` paths so AddonFor body `.mdf2` (Apocalypse) matches Main’s `Tex_XXXX` binds |
+| 14 | Costume MSG | `msg_name.sync_costume_names_for_targets` | Claire clairecos + Leon leoncos DLC names on Convert; base slots stay on Costume names pack |
+| 14b | Figure gallery | `figure_scenes.convert_figure_scenes_for_ops` / `strip_claire_extra_figures` | Convert: retarget extras onto target DLC id, or promote onto vanilla `…/figure/pl/` scenes (Claire Jacket/Tank/Classic*; Leon Casual/Police/…). Base→base renames existing `figure/pl/` files and aliases leftover template stems. Delete-only: strip all extras for that character prefix. |
 | 15 | Contentsholder | `contentsholder` | Delete only — never retarget |
 | 16 | Binary patch | `path_patch` | Same-length ASCII + UTF-16LE (paths + `*_Mat` names) |
 | 16b | Material hashes | `material_hash.patch_mdf_material_hashes` | Murmur3 hashes must match remapped `*_Mat` (rain/wet + body bind) |
@@ -124,4 +130,4 @@ They are deleted; loose PFBs/UI/MSG are enough for the target slot.
 
 `isolation.isolation_seed` uses `AddonFor` / `NameAsBundle` / `Name` so face/hair
 addons share the main mod’s `pl18xx` IDs. Batch/session linking fills missing
-`AddonFor` for orphan Claire packs.
+`AddonFor` for orphan Claire/Leon packs.

@@ -196,3 +196,186 @@ def test_convert_per_target_name_noir_only(tmp_path: Path):
     noir_msg = folder / MSG_DIR_DLC / "mes_sys_clairecos_noir.msg.14"
     assert noir_msg.is_file()
     assert read_english_name(noir_msg) == "Named Noir"
+
+
+def _elza_root(tmp_path: Path, platform: str, mesh_suffix: str) -> Path:
+    root = tmp_path / f"elza_{platform}"
+    body = (
+        root / "natives" / platform / "sectionroot" / "character"
+        / "player" / "pl1000" / "pl1004"
+    )
+    body.mkdir(parents=True)
+    (body / f"pl1004.mesh.{mesh_suffix}").write_bytes(b"mesh")
+    write_modinfo(root, Name="Elza Same Slot")
+    return root
+
+
+def test_same_slot_ray_tracing_writes_the_colored_name(tmp_path, monkeypatch):
+    """Elza → Elza on ray tracing skips outfit stages but still ships the name."""
+    from re2_outfit_converter.platform.path_remap import move_tree_to_rt
+    from re2_outfit_converter.platform.reports import ConversionReport as Plat
+
+    def _upgrade(staging, **_kwargs):
+        plat = Plat()
+        move_tree_to_rt(staging, plat)
+        return plat
+
+    monkeypatch.setattr("re2_outfit_converter.converter.upgrade_to_rt", _upgrade)
+    root = _elza_root(tmp_path, "x64", "1808312334")
+    out = tmp_path / "out"
+    out.mkdir()
+    elza = CLAIRE_OUTFIT_BY_KEY["elza"]
+    colored = "<COLOR FF7EB3>Bunny Boom</COLOR>"
+    report = convert_with_ops(
+        analyze(root),
+        [OutfitOp(source=elza, target=elza)],
+        out,
+        as_folder=True,
+        folder_name="ElzaNamed",
+        tag_output=False,
+        write_log=False,
+        game_build="Ray tracing",
+        outfit_display_names={"elza": colored},
+    )
+    folder = report.output_folder
+    assert folder is not None
+    msg = (
+        folder / "natives" / "stm" / "sectionroot" / "message"
+        / "mes_other_dlc" / "mes_sys_clairecos_elza.msg.50397457"
+    )
+    assert msg.is_file()
+    assert int.from_bytes(msg.read_bytes()[:4], "little") == 50397457
+    assert read_english_name(msg) == colored
+
+
+def test_same_slot_classic_name_stays_on_x64(tmp_path, monkeypatch):
+    """A typed name must not move an RT→Classic same-slot pack back to stm."""
+    from re2_outfit_converter.platform.path_remap import move_tree_to_classic
+    from re2_outfit_converter.platform.reports import ConversionReport as Plat
+
+    def _prepare(staging, **_kwargs):
+        plat = Plat()
+        move_tree_to_classic(staging, plat)
+        return plat
+
+    monkeypatch.setattr(
+        "re2_outfit_converter.converter.prepare_classic", _prepare)
+    root = _elza_root(tmp_path, "stm", "2109108288")
+    out = tmp_path / "out_classic"
+    out.mkdir()
+    elza = CLAIRE_OUTFIT_BY_KEY["elza"]
+    report = convert_with_ops(
+        analyze(root),
+        [OutfitOp(source=elza, target=elza)],
+        out,
+        as_folder=True,
+        folder_name="ElzaClassic",
+        tag_output=False,
+        write_log=False,
+        game_build="Classic",
+        outfit_display_names={"elza": "Walker"},
+    )
+    folder = report.output_folder
+    assert folder is not None
+    assert (
+        folder / "natives" / "x64" / "sectionroot" / "character"
+        / "player" / "pl1000" / "pl1004" / "pl1004.mesh.1808312334"
+    ).is_file()
+    msg = (
+        folder / "natives" / "x64" / "sectionroot" / "message"
+        / "mes_other_dlc" / "mes_sys_clairecos_elza.msg.14"
+    )
+    assert msg.is_file()
+    assert read_english_name(msg) == "Walker"
+    assert not (folder / "natives" / "stm").exists()
+
+
+def test_two_dlc_names_stay_on_their_sources(tmp_path: Path):
+    from re2_outfit_converter.msg_name import (
+        sync_costume_names_for_targets,
+        write_outfit_name,
+        _template_path,
+    )
+
+    root = tmp_path / "stage"
+    msg = root / MSG_DIR_DLC
+    msg.mkdir(parents=True)
+    write_outfit_name(
+        _template_path("elza"), msg / "mes_sys_clairecos_elza.msg.14",
+        "Rich Girl", "elza")
+    write_outfit_name(
+        _template_path("noir"), msg / "mes_sys_clairecos_noir.msg.14",
+        "Agent", "noir")
+    elza = CLAIRE_OUTFIT_BY_KEY["elza"]
+    noir = CLAIRE_OUTFIT_BY_KEY["noir"]
+    military = CLAIRE_OUTFIT_BY_KEY["military"]
+    sync_costume_names_for_targets(
+        root,
+        [noir, military],
+        source_msg_stem_by_target={"noir": "elza", "military": "noir"},
+    )
+    assert read_english_name(
+        msg / "mes_sys_clairecos_noir.msg.14") == "Rich Girl"
+    assert read_english_name(
+        msg / "mes_sys_clairecos_military.msg.14") == "Agent"
+    assert not (msg / "mes_sys_clairecos_elza.msg.14").exists()
+
+
+def test_leon_costume_name_is_only_leon_noir(tmp_path: Path):
+    root = tmp_path / "leon"
+    (root / "natives").mkdir(parents=True)
+    msg = root / MSG_DIR_DLC
+    msg.mkdir(parents=True)
+    write_outfit_name(
+        _template_path("leon_noir"),
+        msg / "mes_sys_leoncos_noir.msg.14",
+        "Private Eye",
+        "leon_noir",
+    )
+    write_modinfo(root, Name="Cool Leon")
+    analysis = analyze(root)
+    assert analysis.english_names_by_outfit_key() == {
+        "leon_noir": "Private Eye",
+    }
+    assert analysis.suggested_outfit_display_name("fallback") == "Private Eye"
+
+
+def test_rt_shared_costume_names_are_stripped(tmp_path: Path):
+    from re2_outfit_converter.msg_name import _remove_costume_sys_msgs
+
+    parent = tmp_path / "natives" / "stm" / "sectionroot" / "message" / "mes_sys"
+    parent.mkdir(parents=True)
+    costume = parent / "mes_sys_costume.msg.50397457"
+    reward = parent / "mes_sys_reward.msg.50397457"
+    costume.write_bytes(b"c")
+    reward.write_bytes(b"r")
+    ops = _remove_costume_sys_msgs(tmp_path)
+    assert not costume.exists()
+    assert not reward.exists()
+    assert len(ops) == 2
+
+
+def test_already_ray_tracing_same_slot_writes_the_name(tmp_path: Path):
+    root = _elza_root(tmp_path, "stm", "2109108288")
+    out = tmp_path / "out_rt"
+    out.mkdir()
+    elza = CLAIRE_OUTFIT_BY_KEY["elza"]
+    report = convert_with_ops(
+        analyze(root),
+        [OutfitOp(source=elza, target=elza)],
+        out,
+        as_folder=True,
+        folder_name="ElzaRtNamed",
+        tag_output=False,
+        write_log=False,
+        game_build="Ray tracing",
+        outfit_display_names={"elza": "Walker"},
+    )
+    folder = report.output_folder
+    assert folder is not None
+    msg = (
+        folder / "natives" / "stm" / "sectionroot" / "message"
+        / "mes_other_dlc" / "mes_sys_clairecos_elza.msg.50397457"
+    )
+    assert msg.is_file()
+    assert read_english_name(msg) == "Walker"

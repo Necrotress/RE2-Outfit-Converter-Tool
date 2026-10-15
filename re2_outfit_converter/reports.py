@@ -39,5 +39,9 @@ class ConversionError(Exception):
     pass
 
 
+class ConversionCancelled(ConversionError):
+    """The user stopped a convert that was still running."""
+
+
 class NothingToConvertError(ConversionError):
     """Raised when a mod has no remapable assets for the source outfit."""

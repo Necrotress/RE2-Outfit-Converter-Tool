@@ -7,26 +7,35 @@ import shutil
 from pathlib import Path
 
 from .analyzer import AnalysisResult
+from .character import CLAIRE_PROFILE, CharacterProfile
 from .isolation import add_rename, rename_entries
 from .outfits import (
     CLAIRE_FACE_IDS,
     CLAIRE_HAIR_MESH_IDS,
     CLAIRE_OUTFIT_BY_BODY_ID,
     CLAIRE_SHARED_IDS,
+    LEON_FACE_IDS,
+    LEON_HAIR_MESH_IDS,
+    LEON_OUTFIT_BY_BODY_ID,
+    LEON_SHARED_IDS,
     Outfit,
 )
-from .paths import MESH_ROOTS, PARTS_DIR, resolve_ci
+from .paths import MESH_ROOTS, mesh_roots, parts_dir, resolve_ci
 from .reports import ConversionReport
 
-_PL_ID_RE = re.compile(r"pl1\d{3}", re.IGNORECASE)
+_PL_ID_RE = re.compile(r"pl[0-9]\d{3}", re.IGNORECASE)
 
 
-def _mesh_ids_from_natives(natives_files: list[str]) -> set[str]:
-    """Collect pl1xxx IDs that appear under MESH_ROOTS in a natives file list."""
+def _mesh_ids_from_natives(
+    natives_files: list[str],
+    roots: tuple[str, ...] | None = None,
+) -> set[str]:
+    """Collect plXXXX IDs that appear under mesh roots in a natives file list."""
+    use_roots = roots or MESH_ROOTS
     found: set[str] = set()
     for rel in natives_files:
         low = rel.lower().replace("\\", "/")
-        for root in MESH_ROOTS:
+        for root in use_roots:
             root_l = root.lower()
             if not low.startswith(root_l):
                 continue
@@ -39,9 +48,37 @@ def _mesh_ids_from_natives(natives_files: list[str]) -> set[str]:
     return found
 
 
+def body_id_on_disk(staging: Path, outfit: Outfit) -> bool:
+    """True when this body id is a folder or file under the mesh roots now.
+
+    Promote can create the source folder after analysis was taken. The
+    pre-promote file list must not decide that the folder is absent.
+    """
+    profile = outfit.profile or CLAIRE_PROFILE
+    bid = outfit.body_id.lower()
+    for root in mesh_roots(profile):
+        root_dir = resolve_ci(staging, root)
+        if root_dir is None:
+            continue
+        for entry in root_dir.iterdir():
+            name = entry.name.lower()
+            if (
+                name == bid
+                or name.startswith(bid + ".")
+                or name.startswith(bid + "_")
+            ):
+                return True
+    return False
+
+
 def has_mesh_entry(analysis: AnalysisResult, pl_id: str) -> bool:
     if analysis._mesh_id_set is None:
-        analysis._mesh_id_set = _mesh_ids_from_natives(analysis.natives_files)
+        roots = (
+            analysis.profile.mesh_roots if analysis.profile is not None
+            else MESH_ROOTS
+        )
+        analysis._mesh_id_set = _mesh_ids_from_natives(
+            analysis.natives_files, roots)
     return pl_id.lower() in analysis._mesh_id_set
 
 
@@ -53,10 +90,12 @@ def convert_mesh_ids(staging: Path, _analysis: AnalysisResult,
     old_id, new_id = source.body_id, target.body_id
     if old_id == new_id:
         return
-    for root in MESH_ROOTS:
+    profile = target.profile or source.profile or CLAIRE_PROFILE
+    for root in mesh_roots(profile):
         root_dir = resolve_ci(staging, root)
         if root_dir is not None:
-            rename_entries(root_dir, staging, old_id, new_id, rename_map, report)
+            rename_entries(root_dir, staging, old_id, new_id, rename_map, report,
+                           register_dir_prefix=True)
 
 
 def purge_source_body_meshes(
@@ -71,11 +110,12 @@ def purge_source_body_meshes(
     target folder already exists (common when Elza + Jacket are both selected
     on Nurse-style packs that host a custom body under ``pl1000``).
     """
+    profile = target.profile or CLAIRE_PROFILE
     for source in sources:
         old_id = source.body_id
         if old_id == target.body_id:
             continue
-        for root in MESH_ROOTS:
+        for root in mesh_roots(profile):
             root_dir = resolve_ci(staging, root)
             if root_dir is None:
                 continue
@@ -98,19 +138,24 @@ def purge_source_body_meshes(
 
 
 def _body_pfb_custom_ids(staging: Path, target: Outfit) -> set[str]:
-    """Custom pl1xxx ids referenced by target body PFBs (e.g. pl1008 redirects)."""
-    parts = resolve_ci(staging, PARTS_DIR)
+    """Custom plXXXX ids referenced by target body PFBs (e.g. pl1008 redirects)."""
+    profile = target.profile or CLAIRE_PROFILE
+    parts = resolve_ci(staging, parts_dir(profile))
     if parts is None:
         return set()
+    shared = (
+        CLAIRE_SHARED_IDS | CLAIRE_FACE_IDS | CLAIRE_HAIR_MESH_IDS
+        if profile.key == "claire" else
+        LEON_SHARED_IDS | LEON_FACE_IDS | LEON_HAIR_MESH_IDS
+    )
     skip = (
-        {target.body_id.lower(), "pl1000"}
-        | {x.lower() for x in CLAIRE_SHARED_IDS}
-        | {x.lower() for x in CLAIRE_FACE_IDS}
-        | {x.lower() for x in CLAIRE_HAIR_MESH_IDS}
+        {target.body_id.lower(), profile.player_root}
+        | {x.lower() for x in shared}
     )
     found: set[str] = set()
+    root_name = profile.player_root
     for slot in target.all_slots:
-        for pfb in parts.glob(f"pl1000_body_{slot}.pfb*"):
+        for pfb in parts.glob(f"{root_name}_body_{slot}.pfb*"):
             if not pfb.is_file():
                 continue
             data = pfb.read_bytes()
@@ -134,17 +179,21 @@ def _body_pfb_custom_ids(staging: Path, target: Outfit) -> set[str]:
                 pid = m.group(0).lower()
                 if pid not in skip:
                     found.add(pid)
-    # Only retarget IDs that still exist on disk (incl. nested pl1000/pl1008).
-    # After convert_mesh_ids the source body id may linger in the unpatched PFB
-    # while the folder is already target.body_id — do not treat that as custom.
-    outfit_bodies = {b.lower() for b in CLAIRE_OUTFIT_BY_BODY_ID}
+    # Only retarget IDs that still exist on disk (incl. nested host redirects).
+    body_map = (
+        CLAIRE_OUTFIT_BY_BODY_ID if profile.key == "claire"
+        else LEON_OUTFIT_BY_BODY_ID
+    )
+    outfit_bodies = {b.lower() for b in body_map}
     kept: set[str] = set()
     for pid in found:
         if pid in outfit_bodies:
             continue
-        for root in MESH_ROOTS:
+        for root in mesh_roots(profile):
             root_dir = resolve_ci(staging, root)
-            if root_dir is not None and _custom_body_present(root_dir, pid):
+            if root_dir is not None and _custom_body_present(
+                root_dir, pid, host_name=profile.player_root,
+            ):
                 kept.add(pid)
                 break
     return kept
@@ -167,6 +216,7 @@ def retarget_redirect_bodies(
     if not custom_ids:
         return
     new_id = target.body_id.lower()
+    profile = target.profile or CLAIRE_PROFILE
     for custom_id in sorted(custom_ids):
         if len(custom_id) != len(new_id):
             report.warnings.append(
@@ -175,16 +225,22 @@ def retarget_redirect_bodies(
             )
             continue
         _retarget_one_custom_body(
-            staging, custom_id, new_id, rename_map, report)
+            staging, custom_id, new_id, rename_map, report, profile=profile)
 
 
-def _custom_body_present(root_dir: Path, custom_id: str) -> bool:
+def _custom_body_present(
+    root_dir: Path,
+    custom_id: str,
+    *,
+    host_name: str = "pl1000",
+) -> bool:
     cid = custom_id.lower()
+    host = host_name.lower()
     for entry in root_dir.iterdir():
         name = entry.name.lower()
         if name == cid or name.startswith(cid + ".") or name.startswith(cid + "_"):
             return True
-        if entry.is_dir() and name == "pl1000":
+        if entry.is_dir() and name == host:
             for child in entry.iterdir():
                 cname = child.name.lower()
                 if (cname == cid or cname.startswith(cid + ".")
@@ -199,12 +255,18 @@ def _retarget_one_custom_body(
     new_id: str,
     rename_map: dict[str, str],
     report: ConversionReport,
+    *,
+    profile: CharacterProfile | None = None,
 ) -> None:
-    for root in MESH_ROOTS:
+    profile = profile or CLAIRE_PROFILE
+    host_name = profile.player_root
+    for root in mesh_roots(profile):
         root_dir = resolve_ci(staging, root)
         if root_dir is None:
             continue
-        if not _custom_body_present(root_dir, custom_id):
+        if not _custom_body_present(
+            root_dir, custom_id, host_name=host_name,
+        ):
             continue
 
         # Drop stub target body left from source-outfit rename so custom can
@@ -229,14 +291,15 @@ def _retarget_one_custom_body(
                 f"can occupy {new_id}."
             )
 
-        # Top-level pl1008 / pl1008.chain under the mesh root.
+        # Top-level custom id / chain under the mesh root.
         rename_entries(
-            root_dir, staging, custom_id, new_id, rename_map, report)
+            root_dir, staging, custom_id, new_id, rename_map, report,
+            register_dir_prefix=True)
 
         # Nested host folder: pl1000/pl1008.mesh (Jacket-id folder redirect).
         host = next(
             (c for c in root_dir.iterdir()
-             if c.is_dir() and c.name.lower() == "pl1000"),
+             if c.is_dir() and c.name.lower() == host_name.lower()),
             None,
         )
         if host is None:
@@ -280,7 +343,9 @@ def _retarget_one_custom_body(
                     host.rmdir()
             except OSError:
                 pass
-def sync_streaming_meshes(staging: Path, _target: Outfit,
+
+
+def sync_streaming_meshes(staging: Path, target: Outfit,
                            report: ConversionReport) -> None:
     """Ensure mesh folders exist under both sectionroot and streaming roots.
 
@@ -288,12 +353,17 @@ def sync_streaming_meshes(staging: Path, _target: Outfit,
     Mods often ship only one; converting into another outfit (e.g. Elza→Noir)
     then blends mod textures with vanilla target textures and looks broken.
     """
-    section = resolve_ci(staging, MESH_ROOTS[0])
-    stream = resolve_ci(staging, MESH_ROOTS[1])
+    profile = target.profile or CLAIRE_PROFILE
+    roots = mesh_roots(profile)
+    section = resolve_ci(staging, roots[0])
+    stream = resolve_ci(staging, roots[1])
 
     if section is not None and stream is None:
-        stream = staging / MESH_ROOTS[1]
+        stream = staging / roots[1]
         stream.mkdir(parents=True, exist_ok=True)
+    elif stream is not None and section is None:
+        section = staging / roots[0]
+        section.mkdir(parents=True, exist_ok=True)
 
     if section is None and stream is None:
         return
@@ -303,9 +373,10 @@ def sync_streaming_meshes(staging: Path, _target: Outfit,
     str_by = ({c.name.lower(): c for c in stream.iterdir()}
               if stream is not None else {})
     names = sorted(set(sec_by) | set(str_by))
+    prefix = profile.player_root[:3]  # pl1 / pl0
 
     for name_low in names:
-        if not name_low.startswith("pl1"):
+        if not name_low.startswith(prefix):
             continue
         sec_item = sec_by.get(name_low)
         str_item = str_by.get(name_low)

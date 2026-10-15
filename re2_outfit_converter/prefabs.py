@@ -5,19 +5,28 @@ from __future__ import annotations
 from pathlib import Path
 
 from .analyzer import PfbSlot
+from .character import CLAIRE_PROFILE, CharacterProfile
 from .outfits import Outfit
-from .paths import PARTS_DIR, PFB_EXT_RE, ensure_dir_ci
+from .paths import PFB_EXT_RE, ensure_dir_ci, parts_dir
 from .reports import ConversionReport
 
 
-def convert_pfb_slots(staging: Path, src_pfbs: list[PfbSlot],
-                       source: Outfit, target: Outfit,
-                       report: ConversionReport) -> None:
+def convert_pfb_slots(
+    staging: Path,
+    src_pfbs: list[PfbSlot],
+    source: Outfit,
+    target: Outfit,
+    report: ConversionReport,
+    *,
+    profile: CharacterProfile | None = None,
+) -> None:
+    profile = profile or target.profile or source.profile or CLAIRE_PROFILE
     by_part: dict[str, list[PfbSlot]] = {}
     for p in src_pfbs:
         by_part.setdefault(p.part, []).append(p)
 
-    target_dir = ensure_dir_ci(staging, PARTS_DIR)
+    target_dir = ensure_dir_ci(staging, parts_dir(profile))
+    root = profile.player_root
     for part, pfbs in by_part.items():
         primary = next((p for p in pfbs if p.slot == source.primary_slot), pfbs[0])
         primary_path = staging / primary.relpath
@@ -33,6 +42,6 @@ def convert_pfb_slots(staging: Path, src_pfbs: list[PfbSlot],
             (staging / p.relpath).unlink(missing_ok=True)
 
         for slot in target.all_slots:
-            new_name = f"pl1000_{part}_{slot}{ext}"
+            new_name = f"{root}_{part}_{slot}{ext}"
             (target_dir / new_name).write_bytes(data)
             report.pfb_ops.append(f"{Path(primary.relpath).name}  ->  {new_name}")

@@ -9,7 +9,10 @@ from pathlib import Path
 
 from .analyzer import AnalysisResult
 from .convert_log import context_from_analysis, write_convert_log_to_staging
-from .hair_prefabs import ensure_isolated_hair_redirect
+from .hair_prefabs import (
+    drop_mesh_only_hair_pfbs,
+    ensure_isolated_hair_redirect,
+)
 from .isolation import (
     isolate_claire_face_hair,
     isolate_shared_outfit_textures,
@@ -17,15 +20,17 @@ from .isolation import (
     staging_mesh_ids,
 )
 from .outfit_ops import OutfitOp
-from .outfits import CLAIRE_FACE_IDS, CLAIRE_HAIR_MESH_IDS, Outfit
+from .character import CLAIRE_PROFILE
+from .outfits import Outfit
 from .packaging import (
     make_folder,
+    resolve_convert_tag_flags,
     resolve_tag_marker,
     update_modinfo,
 )
 from .path_patch import patch_binaries
 from .material_hash import patch_mdf_material_hashes
-from .paths import PARTS_DIR, resolve_ci
+from .paths import parts_dir, resolve_ci
 from .reports import ConversionError, ConversionReport
 
 
@@ -41,6 +46,8 @@ def passthrough_folder(
     write_log: bool = True,
     source_name: str | None = None,
     ops: Sequence[OutfitOp] | None = None,
+    tag_modinfo_description: bool | None = None,
+    tag_modinfo_name: bool = False,
 ) -> ConversionReport:
     """Copy a mod into the batch staging folder without outfit remapping.
 
@@ -56,23 +63,34 @@ def passthrough_folder(
     try:
         shutil.copytree(analysis.root, staging, dirs_exist_ok=True)
         rename_map: dict[str, str] = {}
-        outfit = analysis.claire_outfits[0] if analysis.claire_outfits else target
+        outfits = analysis.outfits or analysis.claire_outfits
+        outfit = outfits[0] if outfits else target
+        profile = analysis.profile or target.profile or CLAIRE_PROFILE
         face_priv, hair_priv = isolate_claire_face_hair(
             staging, analysis, outfit, target, rename_map, report)
         hair_for_t = resolve_hair_id_for_target(staging, target, hair_priv)
         if hair_for_t:
             ensure_isolated_hair_redirect(
                 staging, analysis, target, hair_for_t, rename_map, report)
+        drop_mesh_only_hair_pfbs(
+            staging, report,
+            is_addon=bool(analysis.modinfo.addonfor),
+            profile=profile,
+        )
         isolate_shared_outfit_textures(
             staging, face_priv, rename_map, report)
-        drop_orphan_part_pfbs(staging, report)
+        drop_orphan_part_pfbs(staging, report, profile=profile)
         if rename_map:
             patch_binaries(staging, rename_map, report)
             patch_mdf_material_hashes(staging, rename_map, report)
         marker = resolve_tag_marker(target, tag_marker)
+        do_zip, do_desc, do_name = resolve_convert_tag_flags(
+            tag_output, converting=True,
+            tag_modinfo_description=tag_modinfo_description,
+            tag_modinfo_name=tag_modinfo_name)
         modinfo_warn = update_modinfo(
-            staging, target, tag_output=tag_output, tag_marker=marker,
-            strip_tag_markers=strip_tag_markers)
+            staging, target, tag_output=do_desc, tag_marker=marker,
+            strip_tag_markers=strip_tag_markers, tag_name=do_name)
         if modinfo_warn:
             report.warnings.append(modinfo_warn)
         if write_log:
@@ -81,7 +99,7 @@ def passthrough_folder(
                 analysis, op_list,
                 source_name=source_name,
                 as_folder=True,
-                tag_output=tag_output,
+                tag_output=do_zip,
                 tag_marker=marker or "",
                 label=source_name or "",
                 package_name="passthrough folder (includes convert.log)",
@@ -89,32 +107,39 @@ def passthrough_folder(
             write_convert_log_to_staging(staging, report, log_ctx)
         report.output_folder = make_folder(
             staging, analysis, target, output_dir, folder_name,
-            tag_output=tag_output, tag_marker=marker,
+            tag_output=do_zip, tag_marker=marker,
             strip_tag_markers=strip_tag_markers)
     finally:
         staging_tmp.cleanup()
     return report
 
 
-def drop_orphan_part_pfbs(staging: Path, report: ConversionReport) -> None:
+def drop_orphan_part_pfbs(
+    staging: Path,
+    report: ConversionReport,
+    *,
+    profile=None,
+) -> None:
     """Remove face/hair PFBs when this package ships no face/hair mesh folders.
 
-    Shared pl1050/pl1070 folders count; private pl18xx folders from isolation
+    Shared face/hair folders count; private pl18xx folders from isolation
     also count. Texture-only addons typically only carry a hair redirect PFB
     that would undo the main mod's private-ID redirect.
     """
-    present = staging_mesh_ids(staging)
-    face_hair_ids = CLAIRE_FACE_IDS | CLAIRE_HAIR_MESH_IDS
+    profile = profile or CLAIRE_PROFILE
+    present = staging_mesh_ids(staging, profile)
+    face_hair_ids = profile.face_ids | profile.hair_mesh_ids
     has_face_hair_mesh = bool(present & face_hair_ids) or any(
         pid.startswith("pl18") for pid in present
     )
     if has_face_hair_mesh:
         return
-    target_dir = resolve_ci(staging, PARTS_DIR)
+    target_dir = resolve_ci(staging, parts_dir(profile))
     if target_dir is None:
         return
+    root = profile.player_root
     for part in ("face", "hair"):
-        for path in sorted(target_dir.glob(f"pl1000_{part}_*.pfb*")):
+        for path in sorted(target_dir.glob(f"{root}_{part}_*.pfb*")):
             if not path.is_file():
                 continue
             rel = path.relative_to(staging).as_posix()

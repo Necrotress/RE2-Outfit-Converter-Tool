@@ -28,6 +28,10 @@ binaries += collect_dynamic_libs('chardet')
 
 datas += [('re2_outfit_converter/assets', 're2_outfit_converter/assets')]
 datas += [('re2_outfit_converter/vendor/remsg', 're2_outfit_converter/vendor/remsg')]
+datas += [(
+    're2_outfit_converter/platform/blender_scripts',
+    're2_outfit_converter/platform/blender_scripts',
+)]
 
 
 def _runtime_toc(entries):

@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from re2_outfit_converter.character import LEON_PROFILE
 from re2_outfit_converter.msg_name import MSG_DIR_DLC, write_outfit_name, _template_path
-from re2_outfit_converter.paths import MESH_ROOTS, PARTS_DIR
+from re2_outfit_converter.paths import MESH_ROOTS, PARTS_DIR, mesh_roots, parts_dir
 
 PARTS = PARTS_DIR
 MESH = MESH_ROOTS[0]
+LEON_PARTS = parts_dir(LEON_PROFILE)
+LEON_MESH = mesh_roots(LEON_PROFILE)[0]
 UI_ROOT = "natives/x64/sectionroot/ui/ui0600"
 HOLDER_DIR = "natives/x64/objectroot/scene/contents/extra"
 
@@ -259,4 +262,44 @@ def build_tank_dress_tex_addon(
         description="Dress color overlay",
         AddonFor=addon_for,
     )
+    return root
+
+
+def build_leon_police_full(
+    tmp_path: Path, name: str = "E2E Leon Police",
+) -> Path:
+    """Leon Police PFBs + body/face/hair + UI ``ui0601_00_01``."""
+    root = tmp_path / "leon_police"
+    parts = root / LEON_PARTS
+    parts.mkdir(parents=True)
+    (parts / "pl0000_body_costume_1.pfb.16").write_bytes(b"body")
+    (parts / "pl0000_face_costume_1.pfb.16").write_bytes(b"face")
+    (parts / "pl0000_hair_costume_1.pfb.16").write_bytes(b"hair")
+
+    mesh = root / LEON_MESH
+    for pid, payload in (
+        ("pl0000", b"body"),
+        ("pl0050", b"face"),
+        ("pl0070", b"hair"),
+    ):
+        (mesh / pid).mkdir(parents=True)
+        (mesh / pid / f"{pid}.mdf2.10").write_bytes(payload + b"-mdf")
+        (mesh / pid / f"{pid}.mesh.1").write_bytes(payload + b"-mesh")
+
+    ui = root / UI_ROOT
+    (ui / "prefab").mkdir(parents=True)
+    (ui / "tex").mkdir(parents=True)
+    ui_raw = _u16("ui0601_00_01")
+    (ui / "prefab" / "ui0601_00_01.pfb.16").write_bytes(b"PFB" + ui_raw)
+    (ui / "tex" / "ui0601_00_01_iam.tex.10").write_bytes(b"tex")
+    (ui / "tex" / "ui0601_00_01.uvs.7").write_bytes(b"uvs")
+
+    plant_engine_path_binary(
+        root,
+        "natives/x64/objectroot/prefab/character/survivor/parts/pl0000/"
+        "ref_pl0000.mdf2.10",
+        "sectionroot/character/player/pl0000/pl0000/pl0000.mdf2",
+    )
+
+    write_modinfo(root, Name=name, Description="Leon Police fixture")
     return root

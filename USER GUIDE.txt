@@ -1,10 +1,11 @@
 ================================================================================
 RE2 REMAKE OUTFIT CONVERTER
-User Guide  ·  v1.1.8
+User Guide  ·  v1.3.1
 ================================================================================
 
-Convert Claire costume mods between in-game outfit slots for Fluffy Mod Manager
-— e.g. take an Elza Walker mod and retarget it to Noir, Jacket, or Tank Top.
+Convert Claire and Leon costume mods between in-game outfit slots for Fluffy
+Mod Manager — e.g. take an Elza Walker mod and retarget it to Noir, Jacket,
+or Tank Top, or a Leon Police mod to Casual.
 
 
 --------------------------------------------------------------------------------
@@ -26,7 +27,7 @@ QUICK START
   1. Extract this archive (you should get RE2 Outfit Converter.exe + this guide).
   2. Run RE2 Outfit Converter.exe
      (first launch may take a few seconds)
-  3. Drop a Claire outfit mod onto the window (folder, .zip, .rar, or .7z)
+  3. Drop a Claire or Leon outfit mod onto the window (folder, .zip, .rar, or .7z)
      Tip: drop the main mod plus AddonFor options together for one combined zip
   4. Check the detected outfit(s): tick every Convert-from slot you want to
      handle. Click a ticked slot to set its Convert to (or Delete on
@@ -47,7 +48,7 @@ your source of truth if you need to convert again, compare, or go back.
 WHAT IT DOES
 --------------------------------------------------------------------------------
 
-  - Remaps Claire outfit slots (body / face / hair prefabs and body meshes)
+  - Remaps Claire or Leon outfit slots (body / face / hair prefabs and body meshes)
   - Remaps or clears costume-select preview art for the target outfit
     (when both Jacket and Tank previews exist, the Convert-from art wins)
   - Optionally sets the in-game costume name (where supported)
@@ -85,12 +86,25 @@ IN-GAME OUTFIT NAMES
 
   Convert "Set in-game outfit name" (Elza / Noir / Military):
     Writes that outfit's own costume-menu name file.
+    <COLOR FF4040>Name</COLOR> previews that color in the box, the same
+    way Costume names does. The tag colors the name in the costume menu.
+    Ray tracing output puts that file under natives/stm as .msg.50397457.
+    That is the message version the current game loads. .msg.17 is ignored.
 
   Costume names button (Claire + Leon tabs):
     Claire's Jacket / Tank / Classic* and Leon's Casual / Police / Classic
     Police (and Injured) share one pair of game name files. Create one
     Fluffy "name pack" that can set either or both so they don't overwrite
-    each other. Leave a field blank to keep that slot's vanilla name.
+    each other.     Leave a field blank to keep that slot's vanilla name.
+    Color row: click a name, then a color. Every color inserts
+    <COLOR FF4040>Name</COLOR> (hex, not <COL RED> or 255,128,0). The box
+    text previews that color. The same tag colors the name in the costume menu.
+    If Costume Name Pack.zip is already in the output folder, the editor
+    loads those names and Save updates the same zip.
+    Game build in that dialog: Classic writes natives/x64 .msg.14.
+    Ray tracing writes natives/stm .msg.50397457. It starts
+    on the pack's current build, or the main window's Game build for a
+    new pack.
     Enable only one such name pack in Fluffy at a time.
 
 
@@ -110,7 +124,9 @@ LINUX
 SETTINGS
 --------------------------------------------------------------------------------
 
-  Open Settings from the main window.
+  Open Settings from the gear in the header (hover to confirm). Esc closes
+  Settings and Costume names. Settings keeps a fixed size and scrolls the
+  outfit-tag lists.
 
   Write convert log
       Embeds convert.log inside the output package.
@@ -119,18 +135,27 @@ SETTINGS
       Records mod name, From→To, file changes, and warnings.
       On by default — turn off if you do not want the log in the package.
 
-  Skip conversion confirmation
-      Start Convert immediately without a confirmation popup.
-
   Skip completion dialog
       Show "Conversion completed" under the bar instead of a popup.
 
-  Show outfit names / tags in convert menus
-      Control whether menus show names like "Classic (Jacket)" and tags
-      like "[Classic]".
+  Outfit tags (collapsible; Claire / Leon lists inside):
+      Outfit tag to zip name (on by default)
+          e.g. MyMod [Noir].zip
+      Outfit tag to description (on by default)
+          e.g. Description=... [Noir]
+      [RTX] / [Non-RTX] to zip name (on by default)
+          e.g. MyMod [Noir] [RTX].zip
+          Stamped only when the convert changes the game build.
+      [RTX] / [Non-RTX] to description (on by default)
+          e.g. Description=... [Non-RTX]
+      Customize the tag text per outfit below.
 
-  Add outfit tag to zip name and modinfo
-      e.g. MyMod [Noir].zip — customize the tag text per outfit below.
+  Blender (mesh / material)
+      Use Blender for mesh and material conversion (on by default).
+      Set blender.exe, or Auto-detect. Test checks Blender 4.3 and
+      RE Mesh Editor. Texture conversion does not use Blender.
+      If a convert needs that work and Blender is missing or Test would
+      fail, the convert stops.
 
 
 --------------------------------------------------------------------------------
@@ -163,7 +188,7 @@ TIPS (FLUFFY / RE2R)
 LIMITATIONS
 --------------------------------------------------------------------------------
 
-  - Claire outfit mods only (not a general RE Engine mod converter)
+  - Claire and Leon outfit mods (not a general RE Engine mod converter)
   - '98 Classic cannot be converted (different mesh layout)
   - Claire Jacket/Tank/Classic* and Leon Casual/Police/Classic* share one
     name file — use Costume names (one Fluffy name pack at a time)

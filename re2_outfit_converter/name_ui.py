@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .msg_name import CLAIRECOS_MSG_STEMS, CLAIRE_SHARED_NAME_PACK_KEYS
+from .msg_name import DLC_COS_MSG_STEMS, CLAIRE_SHARED_NAME_PACK_KEYS
 from .outfits import Outfit
 
 # Convert-to Claire targets that share mes_sys_costume / mes_sys_reward.
@@ -14,10 +14,10 @@ SHARED_NAME_PACK_HINT = (
 
 
 def is_convert_namable(target: Outfit | None) -> bool:
-    """True when Convert can set an in-game name (DLC clairecos only)."""
+    """True when Convert can set an in-game name (DLC clairecos / leoncos)."""
     if target is None or not target.msg_stem:
         return False
-    return target.msg_stem.lower() in CLAIRECOS_MSG_STEMS
+    return target.msg_stem.lower() in DLC_COS_MSG_STEMS
 
 
 def uses_shared_name_pack(target: Outfit | None) -> bool:

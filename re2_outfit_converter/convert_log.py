@@ -51,7 +51,8 @@ def context_from_analysis(
     package_name: str = "",
     label: str = "",
 ) -> ConvertLogContext:
-    outfits = ", ".join(o.name for o in analysis.claire_outfits) or "(none)"
+    detected = analysis.outfits or analysis.claire_outfits
+    outfits = ", ".join(o.name for o in detected) or "(none)"
     characters = ", ".join(sorted(analysis.characters)) or "(none)"
     op_lines: list[str] = []
     for op in ops:

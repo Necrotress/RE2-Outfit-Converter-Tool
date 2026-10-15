@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .reports import ConversionReport
 
-_MAT_NAME_RE = re.compile(r"^pl1\d{3}_[A-Za-z0-9_]+_Mat$")
+_MAT_NAME_RE = re.compile(r"^pl[01]\d{3}_[A-Za-z0-9_]+_Mat$")
 
 
 def murmur3_32(data: bytes, seed: int = 0xFFFFFFFF) -> int:

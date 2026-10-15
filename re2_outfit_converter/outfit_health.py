@@ -7,7 +7,12 @@ from collections.abc import Sequence
 from .analyzer import AnalysisResult
 from .meshes import has_mesh_entry
 from .outfits import Outfit, is_convertible_outfit
-from .paths import MESH_ROOTS
+from .character import CLAIRE_PROFILE
+from .paths import mesh_roots
+
+
+def _analysis_outfits(analysis: AnalysisResult):
+    return analysis.outfits or analysis.claire_outfits
 
 
 def incomplete_outfits(analysis: AnalysisResult) -> dict[str, str]:
@@ -17,7 +22,7 @@ def incomplete_outfits(analysis: AnalysisResult) -> dict[str, str]:
     ``.mesh`` under mesh roots for that body id.
     """
     reasons: dict[str, str] = {}
-    for outfit in analysis.claire_outfits:
+    for outfit in _analysis_outfits(analysis):
         if not is_convertible_outfit(outfit):
             continue
         reason = _incomplete_reason(analysis, outfit)
@@ -30,7 +35,7 @@ def outfit_has_body_mesh(analysis: AnalysisResult, outfit: Outfit) -> bool:
     """True if this package has a real ``.mesh`` for the outfit body id."""
     body_id = outfit.body_id.lower()
     return has_mesh_entry(analysis, body_id) and _has_mesh_file(
-        analysis, body_id)
+        analysis, body_id, outfit=outfit)
 
 
 def incomplete_outfits_for_load(
@@ -64,7 +69,7 @@ def incomplete_outfits_for_load(
     # Outfit keys with a complete body mesh on any main package.
     main_mesh_keys: set[str] = set()
     for a in mains:
-        for outfit in a.claire_outfits:
+        for outfit in _analysis_outfits(a):
             if is_convertible_outfit(outfit) and outfit_has_body_mesh(
                     a, outfit):
                 main_mesh_keys.add(outfit.key)
@@ -82,10 +87,12 @@ def incomplete_outfits_for_load(
 def _incomplete_reason(analysis: AnalysisResult, outfit: Outfit) -> str | None:
     body_id = outfit.body_id.lower()
     has_mesh = outfit_has_body_mesh(analysis, outfit)
-    has_body_assets = _has_body_non_mesh_assets(analysis, body_id)
+    has_body_assets = _has_body_non_mesh_assets(
+        analysis, body_id, outfit=outfit)
+    pfbs = analysis.pfbs or analysis.claire_pfbs
     has_body_pfb = any(
         p.part == "body" and p.slot in outfit.all_slots
-        for p in analysis.claire_pfbs
+        for p in pfbs
     )
 
     if has_body_assets and not has_mesh:
@@ -102,12 +109,26 @@ def _incomplete_reason(analysis: AnalysisResult, outfit: Outfit) -> str | None:
     return None
 
 
-def _has_mesh_file(analysis: AnalysisResult, body_id: str) -> bool:
+def _mesh_roots_for(analysis: AnalysisResult, outfit: Outfit | None = None):
+    if outfit is not None:
+        return mesh_roots(outfit.profile)
+    if analysis.profile is not None:
+        return mesh_roots(analysis.profile)
+    return mesh_roots(CLAIRE_PROFILE)
+
+
+def _has_mesh_file(
+    analysis: AnalysisResult,
+    body_id: str,
+    *,
+    outfit: Outfit | None = None,
+) -> bool:
     """True if a real ``.mesh`` file exists under mesh roots for body_id."""
     bid = body_id.lower()
+    roots = _mesh_roots_for(analysis, outfit)
     for rel in analysis.natives_files:
         low = rel.lower().replace("\\", "/")
-        for root in MESH_ROOTS:
+        for root in roots:
             root_l = root.lower()
             if not low.startswith(root_l + "/"):
                 continue
@@ -120,12 +141,18 @@ def _has_mesh_file(analysis: AnalysisResult, body_id: str) -> bool:
     return False
 
 
-def _has_body_non_mesh_assets(analysis: AnalysisResult, body_id: str) -> bool:
+def _has_body_non_mesh_assets(
+    analysis: AnalysisResult,
+    body_id: str,
+    *,
+    outfit: Outfit | None = None,
+) -> bool:
     """Textures / mdf2 / other files under the body id folder (no mesh required)."""
     bid = body_id.lower()
+    roots = _mesh_roots_for(analysis, outfit)
     for rel in analysis.natives_files:
         low = rel.lower().replace("\\", "/")
-        for root in MESH_ROOTS:
+        for root in roots:
             root_l = root.lower()
             if not low.startswith(root_l + "/"):
                 continue

@@ -7,7 +7,13 @@ import os
 import sys
 from pathlib import Path
 
-from .outfits import CONVERTIBLE_OUTFITS, default_outfit_tag_markers, default_tag_marker
+from .outfits import (
+    ALL_CONVERTIBLE_OUTFITS,
+    CONVERTIBLE_OUTFITS,
+    convertible_outfits_for,
+    default_outfit_tag_markers,
+    default_tag_marker,
+)
 
 
 def app_dir() -> Path:
@@ -42,27 +48,76 @@ def icon_path() -> Path | None:
 def normalize_settings(data: dict) -> dict:
     """Migrate legacy keys and ensure defaults the UI expects."""
     settings = dict(data)
-    if "skip_convert_confirm" in settings:
-        settings["skip_convert_confirm"] = bool(
-            settings["skip_convert_confirm"])
-        settings.pop("skip_same_outfit_popup", None)
-    elif "skip_same_outfit_popup" in settings:
-        settings["skip_convert_confirm"] = bool(
-            settings.pop("skip_same_outfit_popup"))
-    else:
-        settings["skip_convert_confirm"] = False
+    settings.pop("skip_convert_confirm", None)
+    settings.pop("skip_same_outfit_popup", None)
+    settings.pop("menu_show_outfit_name", None)
+    settings.pop("menu_show_outfit_tag", None)
     settings["skip_completion_dialog"] = bool(
         settings.get("skip_completion_dialog", False))
-    settings["menu_show_outfit_name"] = bool(
-        settings.get("menu_show_outfit_name", True))
-    settings["menu_show_outfit_tag"] = bool(
-        settings.get("menu_show_outfit_tag", True))
-    settings["tag_output"] = bool(settings.get("tag_output", True))
+    settings["menu_outfit_labels"] = (
+        "tag" if settings.get("menu_outfit_labels") == "tag" else "name")
+    settings.pop("face_look", None)
+    # Each missing split flag inherits legacy ``tag_output`` on its own.
+    # Requiring both keys to be absent used to default zip tagging back on
+    # when only Description had been saved.
+    if "tag_zip_name" not in settings:
+        settings["tag_zip_name"] = bool(settings.get("tag_output", True))
+    if "tag_modinfo_description" not in settings:
+        settings["tag_modinfo_description"] = bool(
+            settings.get("tag_output", True))
+    settings["tag_zip_name"] = bool(settings.get("tag_zip_name", True))
+    settings["tag_modinfo_description"] = bool(
+        settings.get("tag_modinfo_description", True))
+    # Name tags collide with AddonFor packs. Keep the key, always off.
+    settings["tag_modinfo_name"] = False
+    if "tag_build_zip_name" not in settings:
+        settings["tag_build_zip_name"] = True
+    if "tag_build_modinfo_description" not in settings:
+        settings["tag_build_modinfo_description"] = True
+    settings["tag_build_zip_name"] = bool(
+        settings.get("tag_build_zip_name", True))
+    settings["tag_build_modinfo_description"] = bool(
+        settings.get("tag_build_modinfo_description", True))
+    settings["use_blender"] = bool(settings.get("use_blender", True))
+    blender_path = settings.get("blender_path")
+    settings["blender_path"] = (
+        blender_path.strip() if isinstance(blender_path, str) else "")
+    settings["tag_output"] = settings["tag_zip_name"]
     settings["write_convert_log"] = bool(
         settings.get("write_convert_log", True))
+    settings.pop("ui_mode", None)
+    settings["settings_outfit_tags_open"] = bool(
+        settings.get("settings_outfit_tags_open", True))
+    settings["settings_claire_tags_open"] = bool(
+        settings.get("settings_claire_tags_open", True))
+    settings["settings_leon_tags_open"] = bool(
+        settings.get("settings_leon_tags_open", False))
+    geo = settings.get("settings_geometry")
+    settings["settings_geometry"] = (
+        str(geo).strip() if isinstance(geo, str) else "")
+    name_geo = settings.get("name_pack_geometry")
+    settings["name_pack_geometry"] = (
+        str(name_geo).strip() if isinstance(name_geo, str) else "")
     settings.pop("military_face", None)
-    if not isinstance(settings.get("outfit_tags"), dict):
-        settings["outfit_tags"] = default_outfit_tag_markers()
+    defaults = default_outfit_tag_markers()
+    raw_tags = settings.get("outfit_tags")
+    if not isinstance(raw_tags, dict):
+        settings["outfit_tags"] = defaults
+    else:
+        # Keep user values; fill any newly added Leon/Claire keys.
+        merged = dict(defaults)
+        # Legacy key from early Leon draft (Mafia → Arklay Sheriff).
+        if (
+            "leon_mafia" in raw_tags
+            and "leon_sheriff" not in raw_tags
+            and isinstance(raw_tags.get("leon_mafia"), str)
+        ):
+            raw_tags = dict(raw_tags)
+            raw_tags["leon_sheriff"] = raw_tags["leon_mafia"]
+        for key, value in raw_tags.items():
+            if key in defaults and isinstance(value, str):
+                merged[key] = value.strip()
+        settings["outfit_tags"] = merged
     return settings
 
 
@@ -157,23 +212,42 @@ def strip_tag_markers(settings: dict) -> list[str]:
 
 
 def outfit_menu_label(settings: dict, outfit) -> str:
-    parts: list[str] = []
-    if settings.get("menu_show_outfit_name", True):
-        parts.append(outfit.name)
-    if settings.get("menu_show_outfit_tag", True):
+    """Convert-menu text: the outfit name, or its tag, never both."""
+    if settings.get("menu_outfit_labels") == "tag":
         marker = (tag_marker_for(settings, outfit) or "").strip()
-        if marker:
-            parts.append(marker)
-    return " ".join(parts) if parts else outfit.name
+        return marker or outfit.name
+    return outfit.name
 
 
-def outfit_menu_labels(settings: dict) -> list[str]:
-    return [outfit_menu_label(settings, o) for o in CONVERTIBLE_OUTFITS]
+def outfit_menu_labels(
+    settings: dict,
+    *,
+    character: str | None = None,
+) -> list[str]:
+    outfits = (
+        convertible_outfits_for(character)
+        if character
+        else list(CONVERTIBLE_OUTFITS)
+    )
+    return [outfit_menu_label(settings, o) for o in outfits]
 
 
-def outfit_from_menu_label(settings: dict, label: str):
+def outfit_from_menu_label(
+    settings: dict,
+    label: str,
+    *,
+    character: str | None = None,
+):
     text = (label or "").strip()
-    for outfit in CONVERTIBLE_OUTFITS:
-        if outfit_menu_label(settings, outfit) == text or outfit.name == text:
+    outfits = (
+        convertible_outfits_for(character)
+        if character
+        else list(ALL_CONVERTIBLE_OUTFITS)
+    )
+    for outfit in outfits:
+        marker = (tag_marker_for(settings, outfit) or "").strip()
+        if text in (
+            outfit_menu_label(settings, outfit), outfit.name, marker,
+        ):
             return outfit
     return None

@@ -5,15 +5,16 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+from .character import CLAIRE_PROFILE, CharacterProfile
+from .isolation import add_rename, alias_standard_mesh_paths
+from .outfits import EXCLUSIVE_PART_IDS
 from .paths import (
-    MESH_ROOTS,
     assets_dir,
     ensure_dir_ci,
     folder_has_mdf,
+    mesh_roots,
     resolve_ci,
 )
-from .isolation import add_rename, alias_standard_mesh_paths
-from .outfits import EXCLUSIVE_PART_IDS
 from .reports import ConversionReport
 
 
@@ -28,6 +29,7 @@ def ensure_private_exclusive_mdf(
     exclusive_id: str,
     rename_map: dict[str, str],
     report: ConversionReport,
+    profile: CharacterProfile | None = None,
 ) -> bool:
     """Copy bundled exclusive .mdf2 into the private hair folder if missing.
 
@@ -42,15 +44,18 @@ def ensure_private_exclusive_mdf(
     if exclusive_id not in EXCLUSIVE_PART_IDS or len(hair_priv) != 6:
         return False
 
+    roots = mesh_roots(profile)
+    player_root = (profile or CLAIRE_PROFILE).player_root
     present = False
-    for root in MESH_ROOTS:
+    for root in roots:
         folder = resolve_ci(staging, f"{root}/{hair_priv}")
         if folder is not None and folder_has_mdf(folder):
             present = True
 
     if present:
         alias_standard_mesh_paths(
-            staging, exclusive_id, hair_priv, rename_map, report)
+            staging, exclusive_id, hair_priv, rename_map, report,
+            profile=profile)
         return True
 
     template = bundled_exclusive_mdf(exclusive_id)
@@ -62,7 +67,7 @@ def ensure_private_exclusive_mdf(
         return False
 
     written = 0
-    for root in MESH_ROOTS:
+    for root in roots:
         # Only seed mesh roots that already have the private kit (or sectionroot).
         folder = resolve_ci(staging, f"{root}/{hair_priv}")
         if folder is None:
@@ -78,7 +83,7 @@ def ensure_private_exclusive_mdf(
         add_rename(
             rename_map,
             # Synthetic old path so patch + aliases can retarget if needed.
-            f"natives/x64/sectionroot/character/player/pl1000/"
+            f"natives/x64/sectionroot/character/player/{player_root}/"
             f"{exclusive_id}/{exclusive_id}.mdf2.10",
             dest.relative_to(staging).as_posix(),
         )
@@ -89,6 +94,7 @@ def ensure_private_exclusive_mdf(
 
     if written or present:
         alias_standard_mesh_paths(
-            staging, exclusive_id, hair_priv, rename_map, report)
+            staging, exclusive_id, hair_priv, rename_map, report,
+            profile=profile)
         return True
     return False

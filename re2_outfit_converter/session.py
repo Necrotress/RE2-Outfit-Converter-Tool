@@ -62,7 +62,8 @@ def link_orphan_addons(
         return
     main_seed = ""
     for analysis in analyses:
-        if not analysis.claire_outfits:
+        outfits = analysis.outfits or analysis.claire_outfits
+        if not outfits:
             continue
         mi = analysis.modinfo
         main_seed = (mi.nameasbundle or mi.name or "").strip()
@@ -71,9 +72,10 @@ def link_orphan_addons(
     if not main_seed:
         return
     for analysis in analyses:
-        if analysis.claire_outfits or analysis.modinfo.addonfor:
+        outfits = analysis.outfits or analysis.claire_outfits
+        if outfits or analysis.modinfo.addonfor:
             continue
-        if not analysis.has_claire_files:
+        if not (analysis.has_claire_files or analysis.has_leon_files):
             continue
         analysis.modinfo.addonfor = main_seed
         if warn:
@@ -142,15 +144,16 @@ def load_inputs(
                 label = root.name if root.name else path.name
                 result.errors.append(f"{label}: {analysis.error}")
                 continue
+            outfits = analysis.outfits or analysis.claire_outfits
             if (
                 skip_non_claire_in_batch
-                and not analysis.claire_outfits
+                and not outfits
                 and not analysis.is_passthrough_candidate
                 and (multi or len(roots) > 1)
             ):
                 label = analysis.modinfo.name or root.name or path.name
                 result.errors.append(
-                    f"{label}: skipped (no Claire outfit / AddonFor)")
+                    f"{label}: skipped (no Claire/Leon outfit / AddonFor)")
                 continue
             result.packages.append(LoadedPackage(
                 source=source,

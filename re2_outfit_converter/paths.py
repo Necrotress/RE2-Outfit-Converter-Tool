@@ -6,12 +6,20 @@ import re
 import sys
 from pathlib import Path
 
-PARTS_DIR = "natives/x64/objectroot/prefab/character/survivor/parts/pl1000"
-MESH_ROOTS = (
-    "natives/x64/sectionroot/character/player/pl1000",
-    "natives/x64/streaming/sectionroot/character/player/pl1000",
-)
+from .character import CLAIRE_PROFILE, CharacterProfile
+
+# Claire defaults kept for callers that have not been profile-wired yet.
+PARTS_DIR = CLAIRE_PROFILE.parts_dir
+MESH_ROOTS = CLAIRE_PROFILE.mesh_roots
 PFB_EXT_RE = re.compile(r"(\.pfb(?:\.\d+)?)$", re.IGNORECASE)
+
+
+def parts_dir(profile: CharacterProfile | None = None) -> str:
+    return (profile or CLAIRE_PROFILE).parts_dir
+
+
+def mesh_roots(profile: CharacterProfile | None = None) -> tuple[str, ...]:
+    return (profile or CLAIRE_PROFILE).mesh_roots
 
 
 def assets_dir() -> Path:
@@ -49,9 +57,10 @@ def ensure_dir_ci(base: Path, rel: str) -> Path:
 
 def engine_path(rel: str) -> str | None:
     """natives/x64/.../file.mesh.1808312334 -> sectionroot/.../file.mesh"""
-    if not rel.lower().startswith("natives/x64/"):
+    low = rel.replace("\\", "/")
+    if not low.lower().startswith("natives/x64/"):
         return None
-    path = rel[len("natives/x64/"):]
+    path = low[len("natives/x64/"):]
     dirname, _, fname = path.rpartition("/")
     segs = fname.split(".")
     if len(segs) >= 3 and segs[-1].isdigit():
@@ -59,8 +68,19 @@ def engine_path(rel: str) -> str | None:
     return f"{dirname}/{fname}" if dirname else fname
 
 
+def engine_dir(rel: str) -> str | None:
+    """natives/x64/.../pl1005 -> sectionroot/.../pl1005.
+
+    Texture paths inside an MDF use this directory. An addon that only
+    ships the MDF still has to follow the body folder rename.
+    """
+    eng = engine_path(rel.rstrip("/") + "/_.mesh.1")
+    if not eng or "/" not in eng:
+        return None
+    return eng.rsplit("/", 1)[0]
+
+
 def folder_has_mdf(folder: Path | None) -> bool:
-    """True if ``folder`` contains any ``.mdf2`` file (shallow or nested)."""
     if folder is None or not folder.is_dir():
         return False
     return any(

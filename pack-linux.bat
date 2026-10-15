@@ -10,7 +10,7 @@ echo.
 if not defined RE2OC_RELEASE_DIR set "RE2OC_RELEASE_DIR=%~dp0release"
 for %%I in ("%RE2OC_RELEASE_DIR%") do set "PROD=%%~fI"
 set "STAGE=%TEMP%\RE2-Outfit-Converter-Linux-pack"
-set "VER=1.1.8"
+set "VER=1.3.1"
 set "OUTZIP=%PROD%\RE2.Outfit.Converter.v%VER%.Linux.zip"
 set "WIN_TAR=%SystemRoot%\System32\tar.exe"
 

@@ -85,7 +85,8 @@ def package_has_outfit_assets(analysis: "AnalysisResult", outfit: Outfit) -> boo
 
     if has_mesh_entry(analysis, outfit.body_id):
         return True
-    return any(p.slot in outfit.all_slots for p in analysis.claire_pfbs)
+    pfbs = analysis.pfbs or analysis.claire_pfbs
+    return any(p.slot in outfit.all_slots for p in pfbs)
 
 
 def adapt_ops_for_package(

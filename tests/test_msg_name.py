@@ -113,3 +113,29 @@ def test_98_original_clairecos_works(tmp_path: Path):
     figure = next(e for e in msg.entrys if (e.name or "").endswith("_Figure"))
     assert _english(figure) == "Claire (Retro Claire)"
     assert figure.name == "Mes_Sys_ClaireCos_Original_Figure"
+
+
+def test_leon_noir_leoncos_works(tmp_path: Path):
+    ops = apply_outfit_display_name(tmp_path, "leon_noir", "Private Eye")
+    dest = tmp_path / MSG_DIR_DLC / "mes_sys_leoncos_noir.msg.14"
+    assert dest.is_file()
+    assert any("mes_sys_leoncos_noir.msg.14" in op for op in ops)
+    assert read_english_name(dest) == "Private Eye"
+    msg = _import_msg(dest)
+    figure = next(e for e in msg.entrys if (e.name or "").endswith("_Figure"))
+    assert _english(figure) == "Leon (Private Eye)"
+    assert figure.name == "Mes_Sys_LeonCos_Noir_Figure"
+    # Popups stripped so foreign GUIDs are not re-registered.
+    assert len(msg.entrys) == 2
+
+
+def test_leon_sheriff_leoncos_works(tmp_path: Path):
+    ops = apply_outfit_display_name(tmp_path, "sheriff", "County Cop")
+    dest = tmp_path / MSG_DIR_DLC / "mes_sys_leoncos_sheriff.msg.14"
+    assert dest.is_file()
+    assert any("mes_sys_leoncos_sheriff.msg.14" in op for op in ops)
+    assert read_english_name(dest) == "County Cop"
+    msg = _import_msg(dest)
+    figure = next(e for e in msg.entrys if (e.name or "").endswith("_Figure"))
+    assert _english(figure) == "Leon (County Cop)"
+    assert figure.name == "Mes_Sys_LeonCos_Sheriff_Figure"

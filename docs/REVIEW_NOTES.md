@@ -26,8 +26,8 @@ Use this instead of embedding full source dumps. Read live code under
 - [ ] Packaging uses public APIs (`make_zip`, `update_modinfo`, …)
 - [ ] E2E tests in `tests/test_e2e_convert.py` pass
 - [ ] Skipped path patches surface as warnings
-- [ ] Converted packs have no author `figurescene_pl1000_*` / `figure_pl1000_*`
-      (ids 10–13); Records viewer relies on vanilla scene + remapped body
+- [ ] Converted packs retarget figure gallery to the target frame (DLC id or
+      base Claire/Leon paths); leftover non-target extras (ids 10–13) are stripped
 - [ ] Multi-target converts keep all target `mes_sys_clairecos_*.msg` files
       (`sync_costume_names_for_targets`, not last-wins)
 
@@ -35,9 +35,10 @@ Use this instead of embedding full source dumps. Read live code under
 
 - Same-length binary patches only (see BINARY_PATCHING.md)
 - `'98 Classic` is detect-only
-- Author figure gallery scenes are stripped on convert (not retargeted) to
-  prevent cross-outfit model-viewer bleed; gallery shows remapped body via
-  the game's vanilla DLC figure scene
+- Author figure gallery scenes are retargeted on convert (DLC frame or base
+  Claire paths) so Bonuses can load isolated face/hair; non-target extras are
+  still stripped. Leaky shared mannequin scenes may still affect other Records
+  viewers — re-test Dimitrescu-style packs after figure changes.
 - Delete-only runs still isolate shared face/hair and remove DLC contentsholders
   (remaining unticked slots are not fully "untouched" at the shared-asset layer)
 - Linux package runs the same CustomTkinter GUI via `./run.sh` (source + venv)

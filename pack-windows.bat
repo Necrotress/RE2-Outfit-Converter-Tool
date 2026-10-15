@@ -10,7 +10,7 @@ if not defined RE2OC_RELEASE_DIR set "RE2OC_RELEASE_DIR=%~dp0release"
 for %%I in ("%RE2OC_BUILD_DIR%") do set "BUILD=%%~fI"
 for %%I in ("%RE2OC_RELEASE_DIR%") do set "PROD=%%~fI"
 set "APPNAME=RE2 Outfit Converter"
-set "VER=1.1.8"
+set "VER=1.3.1"
 set "ZIPNAME=RE2.Outfit.Converter.v%VER%.Windows.zip"
 set "STAGE=%TEMP%\RE2-Outfit-Converter-Windows-pack"
 set "DIST=%BUILD%\dist"
@@ -92,6 +92,8 @@ if errorlevel 1 (
 )
 
 rmdir /S /Q "%STAGE%" 2>nul
+if exist "%DIST%" rmdir /S /Q "%DIST%"
+if exist "%WORK%" rmdir /S /Q "%WORK%"
 
 echo.
 echo DONE - extract the zip, then run %APPNAME%.exe inside the folder.

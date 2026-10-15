@@ -5,13 +5,134 @@ All notable changes to **RE2 Remake Outfit Converter** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.3.1] — 2026-10-14
+
+The main window is restyled. Convert behavior is unchanged from 1.3.0.
 
 ### Changed
 
+- The main window is two cards: the loaded mod, then convert. Costume names is a tag icon, and that dialog scrolls when the window is short.
+- Convert menus show either the outfit name or its tag. Settings, under Skip completion dialog, chooses which.
+
+### Removed
+
+- The old checkboxes that showed both the outfit name and its tag in convert menus.
+
+## [1.3.0] — 2026-10-14
+
+Classic and ray tracing in one window, including mods that are not a Claire or Leon outfit.
+
+### Added
+
+- A mod with no Claire or Leon outfit converts between Classic and ray tracing on its own. The outfit line names who it affects, such as Sherry.
+- Costume names has a color row. Every color, including red and blue, inserts ``<COLOR FF4040>Name</COLOR>``. Named tags like ``<COL RED>`` and comma RGB are ignored by the costume menu.
+
+### Changed
+
+- Analysis shows Classic, Ray tracing, or both. Convert to has a Game build menu that starts on the detected build. Choosing the other build runs the ray-tracing conversion around the outfit stages.
+- Settings can point at Blender 4.3 and RE Mesh Editor. Mesh and material conversion stops if that work is required and Blender is not ready. Texture conversion stays in Python. Prefabs and physics chains are copied.
+- ``[RTX]`` / ``[Non-RTX]`` zip and modinfo Description tags are added only when a convert changes the game build.
+- A custom Claire face left on the shared head (``pl1050``) is kept on the destination costume, so other outfits keep the pak head and neck.
+- Ray-tracing cloth is published when the classic body prefab matches a jacket template (default, costume 1, costume 2, costume 8, costume 9). Other bodies are not given a new chain.
+- A local rebuild keeps only the runnable app. PyInstaller scratch folders are removed when the copy finishes.
+
+### Removed
+
+- Skip conversion confirmation.
+- Add outfit tag to modinfo Name. That tag collided with AddonFor packs.
+
+### Fixed
+
+- Add outfit tag to modinfo Name now writes ``Name=`` (inserts the line when missing, and still matches BOM / spaced keys).
+- Leon Noir / Arklay Sheriff costume-select preview copies shared hair onto ``pl0074`` / ``pl0075`` under ``pl0000`` (same hide as Claire Noir/Military).
+- A UTF-8 BOM on ``modinfo.ini`` no longer drops the mod name on load.
+- Legacy ``tag_output`` still controls zip tagging when only the Description flag was saved.
+- Shared-hair redirects no longer pick up another slot's exclusive hat materials or chain when both kits are isolated in the same convert.
+- Costume Name Pack detection still matches ``modinfo.ini`` when the Name line has a UTF-8 BOM or spaces around ``=``.
+
+## [1.2.0] — 2026-08-14
+
+Leon convert, costume-name pack editing, Settings polish, and several
+convert edge cases.
+
+### Added
+
+- **Leon outfit convert**: same pipeline as Claire, targeting Leon slots
+  under `pl0000` (Casual / Police / Injured / Classic* / Noir / Arklay
+  Sheriff). From/To menus filter by detected character; mixed Claire+Leon
+  ops in one convert are rejected. Leon `'98` stays detect-only.
+- **Leon DLC in-game names on Convert**: Noir / Arklay Sheriff write
+  `mes_sys_leoncos_*.msg` (same pattern as Claire clairecos).
+
+### Changed
+
+- **Costume names** opens the existing pack in the output folder (if any),
+  fills in the saved names, and Save overwrites that pack. It no longer
+  writes a second file such as `Costume Name Pack.zip (2)`. The dialog
+  remembers its window position. Esc closes it.
+- **Settings**: Outfit tags is its own collapsible section (Claire / Leon
+  lists nested inside). The window is a fixed size and scrolls the lists;
+  collapse / expand no longer resizes it. Position is remembered (not
+  height). Header control is a gear icon. Esc closes Settings. Tagging is
+  split into three checkboxes — zip / folder name and modinfo Description
+  (on by default), modinfo Name (off). Older ``tag_output`` settings
+  migrate to zip + Description.
 - `rebuild.bat` / `pack-windows.bat` / `pack-linux.bat` write under in-repo
   `build/` and `release/` (clone-friendly). Optional `RE2OC_BUILD_DIR` /
   `RE2OC_RELEASE_DIR` overrides. Docs updated.
+
+### Fixed
+
+- Convert adds `Description=[Outfit]` to `modinfo.ini` when the source mod
+  had no Description line, so the outfit tag is not skipped.
+- Leon convert into Noir / Arklay Sheriff no longer injects a Claire
+  ``pl1070`` hair redirect under ``pl0000`` (missing chain froze on outfit
+  switch and cutscenes). Hide-exclusive uses Leon shared ``pl0070``.
+- Leon hair isolation / hide-exclusive now scans ``pl0000`` mesh roots
+  (not Claire ``pl1000``), so exclusive hats are seen and redirects are
+  not skipped.
+- Leon mesh packs with leftover Claire textures (e.g. Marston Sheriff +
+  ``pl1000`` chain tex) are detected as Leon instead of tying to Claire Jacket.
+- Settings no longer flashes at the original map location when closing.
+
+## [1.1.8] — 2026-08-01
+
+Leon convert, costume-name pack editing, Settings polish, and several
+convert edge cases.
+
+### Added
+
+- **Leon outfit convert**: same pipeline as Claire, targeting Leon slots
+  under `pl0000` (Casual / Police / Injured / Classic* / Noir / Arklay
+  Sheriff). From/To menus filter by detected character; mixed Claire+Leon
+  ops in one convert are rejected. Leon `'98` stays detect-only.
+- **Leon DLC in-game names on Convert**: Noir / Arklay Sheriff write
+  `mes_sys_leoncos_*.msg` (same pattern as Claire clairecos).
+
+### Changed
+
+- **Costume names** opens the existing pack in the output folder (if any),
+  fills in the saved names, and Save overwrites that pack. It no longer
+  writes a second file such as `Costume Name Pack.zip (2)`.
+- **Settings**: Outfit tags is its own collapsible section (Claire / Leon
+  lists nested inside). The window remembers position and which sections
+  are expanded. Tagging is split into three checkboxes — zip / folder name
+  and modinfo Description (on by default), modinfo Name (off). Older
+  ``tag_output`` settings migrate to zip + Description.
+- `rebuild.bat` / `pack-windows.bat` / `pack-linux.bat` write under in-repo
+  `build/` and `release/` (clone-friendly). Optional `RE2OC_BUILD_DIR` /
+  `RE2OC_RELEASE_DIR` overrides. Docs updated.
+
+### Fixed
+
+- Convert adds `Description=[Outfit]` to `modinfo.ini` when the source mod
+  had no Description line, so the outfit tag is not skipped.
+- Leon convert into Noir / Arklay Sheriff no longer injects a Claire
+  ``pl1070`` hair redirect under ``pl0000`` (missing chain froze on outfit
+  switch and cutscenes). Hide-exclusive uses Leon shared ``pl0070``.
+- Leon mesh packs with leftover Claire textures (e.g. Marston Sheriff +
+  ``pl1000`` chain tex) are detected as Leon instead of tying to Claire Jacket.
+- Settings no longer flashes at the original map location when closing.
 
 ## [1.1.8] — 2026-08-01
 
@@ -47,7 +168,7 @@ landed after that release (formerly tracked as 1.1.5 / 1.1.6 / unreleased).
   `menu.sh`, and CLI docs/tests removed. Windows and Linux ship the
   CustomTkinter GUI only.
 - Repo layout documented for local packaging; pack scripts later moved to
-  in-repo `build/` + `release/` (see Unreleased).
+  in-repo `build/` + `release/` (see 1.2.0).
 - Convert-time "Set in-game outfit name" is **Elza / Noir / Military** only.
   Jacket / Tank / Classic* hint to use **Costume names** instead; convert
   no longer ships the shared costume MSG renames.
@@ -124,6 +245,9 @@ landed after that release (formerly tracked as 1.1.5 / 1.1.6 / unreleased).
 - Face/hair isolation onto private mesh IDs; AddonFor batch packaging.
 - Same-length binary path patching; Fluffy-ready zip/folder output.
 
+[1.3.1]: https://github.com/Necrotress/RE2-Outfit-Converter-Tool/releases/tag/v1.3.1
+[1.3.0]: https://github.com/Necrotress/RE2-Outfit-Converter-Tool/releases/tag/v1.3.0
+[1.2.0]: https://github.com/Necrotress/RE2-Outfit-Converter-Tool/releases/tag/v1.2.0
 [1.1.8]: https://github.com/Necrotress/RE2-Outfit-Converter-Tool/releases/tag/v1.1.8
 [1.1.0]: https://github.com/Necrotress/RE2-Outfit-Converter-Tool/releases/tag/v1.1.0
 [1.0.0]: https://github.com/Necrotress/RE2-Outfit-Converter-Tool/releases/tag/v1.0.0

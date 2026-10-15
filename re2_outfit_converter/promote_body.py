@@ -10,9 +10,10 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+from .character import CLAIRE_PROFILE, CharacterProfile
 from .isolation import add_rename, register_material_name_aliases
 from .outfit_ops import OutfitOp
-from .paths import MESH_ROOTS, resolve_ci
+from .paths import mesh_roots, resolve_ci
 from .reports import ConversionReport
 
 _TEX_HINT = (".tex", ".mdf2")
@@ -111,12 +112,14 @@ def merge_or_rename_body(
     new_id: str,
     rename_map: dict[str, str],
     report: ConversionReport,
+    *,
+    profile: CharacterProfile | None = None,
 ) -> bool:
-    """Move/merge ``old_id`` body folders into ``new_id`` across MESH_ROOTS."""
+    """Move/merge ``old_id`` body folders into ``new_id`` across mesh roots."""
     if old_id == new_id or len(old_id) != len(new_id):
         return False
     promoted = False
-    for root in MESH_ROOTS:
+    for root in mesh_roots(profile or CLAIRE_PROFILE):
         root_dir = resolve_ci(staging, root)
         if root_dir is None or not root_dir.is_dir():
             continue
@@ -186,6 +189,8 @@ def promote_deleted_body_assets(
     receivers = [op.source for op in converts if op.target is not None]
     if not receivers:
         return
+    profile = receivers[0].profile or deletes[0].source.profile or CLAIRE_PROFILE
+    roots = mesh_roots(profile)
 
     for del_op in deletes:
         deleted_id = del_op.source.body_id
@@ -193,7 +198,7 @@ def promote_deleted_body_assets(
             continue
 
         has_assets = False
-        for root in MESH_ROOTS:
+        for root in roots:
             folder = resolve_ci(staging, f"{root}/{deleted_id}")
             if folder is not None and folder.is_dir() and any(folder.iterdir()):
                 has_assets = True
@@ -216,7 +221,7 @@ def promote_deleted_body_assets(
 
         receiver = receivers[0]
         for cand in receivers:
-            for root in MESH_ROOTS:
+            for root in roots:
                 if resolve_ci(staging, f"{root}/{cand.body_id}") is not None:
                     receiver = cand
                     break
@@ -226,7 +231,7 @@ def promote_deleted_body_assets(
 
         del_has_tex = False
         need_promote = False
-        for root in MESH_ROOTS:
+        for root in roots:
             d_folder = resolve_ci(staging, f"{root}/{deleted_id}")
             r_folder = resolve_ci(staging, f"{root}/{receiver.body_id}")
             if d_folder is not None and _body_folder_has_textures(d_folder):
@@ -244,4 +249,5 @@ def promote_deleted_body_assets(
         )
         merge_or_rename_body(
             staging, deleted_id, receiver.body_id, rename_map, report,
+            profile=profile,
         )

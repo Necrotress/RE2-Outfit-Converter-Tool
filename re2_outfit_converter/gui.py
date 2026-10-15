@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import threading
 import tkinter as tk
 import tkinter.filedialog  # noqa: F401
@@ -19,7 +20,14 @@ except ImportError:
     HAS_DND = False
 
 from . import __version__
-from .analyzer import AnalysisResult
+from .cancel import cancel_requested, request_cancel, reset_cancel
+from .analyzer import (
+    AnalysisResult,
+    GAME_BUILDS,
+    game_build_direction,
+    game_build_for,
+    game_label_for,
+)
 from .archive import ModSource
 from .gui_analysis import (
     collect_warnings,
@@ -27,10 +35,11 @@ from .gui_analysis import (
     format_mod_row,
     format_multi_outfit_row,
     format_outfit_row,
+    is_game_build_load,
 )
-from .gui_name_pack import open_name_pack_dialog
+from .gui_name_pack import open_name_pack_dialog, preview_hex_for_name
 from .gui_settings import open_settings_dialog
-from .gui_workers import analyze_paths, convert_loaded
+from .gui_workers import analyze_paths, convert_game_builds, convert_loaded
 from .name_ui import (
     SHARED_NAME_PACK_HINT,
     active_convert_name_target,
@@ -41,8 +50,12 @@ from .name_ui import (
 )
 from .outfit_health import incomplete_outfits_for_load
 from .outfit_ops import OutfitOp
-from .outfits import CONVERTIBLE_OUTFITS, Outfit, is_convertible_outfit
-from .reports import BatchReport, ConversionError
+from .outfits import (
+    Outfit,
+    convertible_outfits_for,
+    is_convertible_outfit,
+)
+from .reports import BatchReport, ConversionCancelled, ConversionError
 from .session import LoadedPackage, close_loaded, package_label
 from .settings import (
     app_dir,
@@ -72,6 +85,7 @@ CONVERT_HOVER = "#0d9488"
 OK_COLOR = "#2ecc71"
 WARN_COLOR = "#f1c40f"
 DIM = "#9a9a9a"
+QUIET_BORDER = "#3a3a3a"
 
 
 @dataclass
@@ -93,6 +107,74 @@ else:
     _Root = ctk.CTk
 
 
+def _quiet_button(parent, text: str, command, **kwargs):
+    """Secondary action: border only, so Convert stays the one solid button."""
+    opts = dict(
+        fg_color="transparent",
+        hover_color="#2a2a2a",
+        border_width=1,
+        border_color=QUIET_BORDER,
+        text_color=("#f2f2f2", "#f2f2f2"),
+        height=32,
+    )
+    opts.update(kwargs)
+    return ctk.CTkButton(parent, text=text, command=command, **opts)
+
+
+def _settings_gear_image() -> ctk.CTkImage | None:
+    """White gear glyph for the header Settings button."""
+    try:
+        import math
+        from PIL import Image, ImageDraw
+    except ImportError:
+        return None
+    size = 64
+    mask = Image.new("L", (size, size), 0)
+    draw = ImageDraw.Draw(mask)
+    cx = cy = (size - 1) / 2.0
+    teeth = 8
+    r_tip = size * 0.46
+    r_valley = size * 0.33
+    r_hole = size * 0.14
+    pts = []
+    for i in range(teeth):
+        a = 2 * math.pi * i / teeth - math.pi / 2
+        da = math.pi / teeth
+        for ang, r in (
+            (a - da * 0.82, r_valley),
+            (a - da * 0.32, r_tip),
+            (a + da * 0.32, r_tip),
+            (a + da * 0.82, r_valley),
+        ):
+            pts.append((cx + r * math.cos(ang), cy + r * math.sin(ang)))
+    draw.polygon(pts, fill=255)
+    draw.ellipse(
+        [cx - r_hole, cy - r_hole, cx + r_hole, cy + r_hole],
+        fill=0,
+    )
+    img = Image.new("RGBA", (size, size), (245, 245, 245, 255))
+    img.putalpha(mask)
+    return ctk.CTkImage(light_image=img, dark_image=img, size=(18, 18))
+
+
+def _costume_names_image() -> ctk.CTkImage | None:
+    """White clothing-tag glyph for the Costume names button."""
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:
+        return None
+    size = 64
+    mask = Image.new("L", (size, size), 0)
+    draw = ImageDraw.Draw(mask)
+    draw.rounded_rectangle((6, 18, 58, 46), radius=10, fill=255)
+    draw.ellipse((14, 26, 26, 38), fill=0)
+    draw.rounded_rectangle((32, 26, 50, 30), radius=2, fill=0)
+    draw.rounded_rectangle((32, 34, 46, 38), radius=2, fill=0)
+    img = Image.new("RGBA", (size, size), (245, 245, 245, 255))
+    img.putalpha(mask)
+    return ctk.CTkImage(light_image=img, dark_image=img, size=(18, 18))
+
+
 class App(_Root):
     def __init__(self):
         ctk.set_appearance_mode("dark")
@@ -100,7 +182,7 @@ class App(_Root):
         super().__init__()
 
         self.title(f"RE2 Remake Outfit Converter  v{__version__}")
-        self.minsize(780, 620)
+        self.minsize(715, 590)
         ctk.set_widget_scaling(1.0)
         ctk.set_window_scaling(1.0)
         icon = icon_path()
@@ -114,9 +196,12 @@ class App(_Root):
         self.loaded: list[LoadedMod] = []
         self.settings = load_settings()
         self._busy = False
+        self._converting = False
         self._closed = False
         self._filling_name = False
         self._suggested_outfit_name = ""
+        self._names_by_outfit_key: dict[str, str] = {}
+        self._name_generic = ""
         self._name_user_edited = False
         self._settings_win: ctk.CTkToplevel | None = None
         self._settings_persist = None
@@ -144,114 +229,201 @@ class App(_Root):
     def _build_ui(self):
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
-        self.grid_rowconfigure(3, weight=1)
+        self.grid_rowconfigure(2, weight=1)
 
         header = ctk.CTkFrame(self, fg_color="transparent")
-        header.grid(row=0, column=0, sticky="ew", padx=14, pady=(10, 0))
-        header.grid_columnconfigure(0, weight=1)
+        header.grid(row=0, column=0, sticky="ew", padx=20, pady=(16, 0))
+        header.grid_columnconfigure(0, weight=1, uniform="header")
+        header.grid_columnconfigure(2, weight=1, uniform="header")
+        title_row = ctk.CTkFrame(header, fg_color="transparent")
+        title_row.grid(row=0, column=1)
         ctk.CTkLabel(
-            header,
-            text=f"RE2 Remake Outfit Converter  v{__version__}",
-            font=ctk.CTkFont(size=14, weight="bold"),
+            title_row,
+            text="RE2 Remake Outfit Converter",
+            font=ctk.CTkFont(size=18, weight="bold"),
             anchor="w",
-        ).grid(row=0, column=0, sticky="w")
+        ).pack(side="left")
+        ctk.CTkLabel(
+            title_row,
+            text=f"v{__version__}",
+            font=ctk.CTkFont(size=13),
+            text_color=DIM,
+            anchor="w",
+        ).pack(side="left", padx=(10, 0), pady=(3, 0))
         header_btns = ctk.CTkFrame(header, fg_color="transparent")
-        header_btns.grid(row=0, column=1, sticky="e")
-        ctk.CTkButton(
-            header_btns, text="Costume names", width=120,
-            command=self._open_name_pack,
+        header_btns.grid(row=0, column=2, sticky="e")
+        self._names_image = _costume_names_image()
+        names_text = "" if self._names_image is not None else "Aa"
+        names_extra = {"width": 36, "height": 32}
+        if self._names_image is not None:
+            names_extra["image"] = self._names_image
+        self.names_btn = _quiet_button(
+            header_btns, names_text, self._open_name_pack, **names_extra)
+        self.names_btn.pack(side="left", padx=(0, 8))
+        self._bind_tooltip(self.names_btn, "Costume names")
+        self._settings_gear_image = _settings_gear_image()
+        gear_kwargs = {
+            "command": self._open_settings,
+            "width": 36,
+            "height": 32,
+            "fg_color": "transparent",
+            "hover_color": "#2a2a2a",
+            "border_width": 1,
+            "border_color": QUIET_BORDER,
+        }
+        if self._settings_gear_image is not None:
+            gear_kwargs["image"] = self._settings_gear_image
+            gear_kwargs["text"] = ""
+        else:
+            gear_kwargs["text"] = "⚙"
+            gear_kwargs["width"] = 36
+        self._gear_btn = ctk.CTkButton(header_btns, **gear_kwargs)
+        self._gear_btn.pack(side="left")
+        self._bind_tooltip(self._gear_btn, "Settings")
+
+        mod = ctk.CTkFrame(self, corner_radius=16)
+        mod.grid(row=1, column=0, sticky="nsew", padx=20, pady=(14, 8))
+        mod.grid_columnconfigure(0, weight=1)
+
+        self._idle_subtitle = (
+            "Folder, zip, rar, or 7z" if HAS_DND
+            else "Select a mod folder or archive")
+        self._idle_headline_font = ctk.CTkFont(size=22, weight="bold")
+        self._loaded_headline_font = ctk.CTkFont(size=16, weight="bold")
+        self.drop_label = ctk.CTkLabel(
+            mod, text="Drop a mod",
+            font=self._idle_headline_font,
+            anchor="w", justify="left")
+        self.drop_label.grid(
+            row=0, column=0, sticky="ew", padx=20, pady=(22, 0))
+
+        self.path_label = ctk.CTkLabel(
+            mod, text=self._idle_subtitle, text_color=DIM,
+            anchor="w", justify="left",
+            font=ctk.CTkFont(size=13))
+        self.path_label.grid(row=1, column=0, sticky="ew", padx=20, pady=(4, 0))
+
+        browse = ctk.CTkFrame(mod, fg_color="transparent")
+        browse.grid(row=2, column=0, pady=(14, 0))
+        _quiet_button(
+            browse, "Folder", self._browse_folder, width=96,
         ).pack(side="left", padx=(0, 8))
-        ctk.CTkButton(
-            header_btns, text="Settings", width=96,
-            command=self._open_settings,
+        _quiet_button(
+            browse, "Archive", self._browse_archive, width=96,
         ).pack(side="left")
 
-        top = ctk.CTkFrame(self, corner_radius=12)
-        top.grid(row=1, column=0, sticky="nsew", padx=14, pady=(8, 4))
-        top.grid_columnconfigure(0, weight=1)
-        top.grid_rowconfigure(0, weight=1)
+        self.facts_row = ctk.CTkFrame(mod, fg_color="transparent")
+        self.facts_row.grid(row=3, column=0, sticky="ew", padx=20, pady=(16, 0))
+        self.facts_row.grid_columnconfigure(1, weight=1)
+        self.facts_row.grid_columnconfigure(3, weight=1)
+        fact_font = ctk.CTkFont(size=12)
+        ctk.CTkLabel(
+            self.facts_row, text="Outfits", width=72, anchor="w",
+            text_color=DIM, font=fact_font,
+        ).grid(row=0, column=0, sticky="nw")
+        outfit_val = ctk.CTkLabel(
+            self.facts_row, text="-", anchor="w", justify="left")
+        outfit_val.grid(row=0, column=1, sticky="ew", padx=(8, 18))
+        ctk.CTkLabel(
+            self.facts_row, text="Build", width=52, anchor="w",
+            text_color=DIM, font=fact_font,
+        ).grid(row=0, column=2, sticky="nw")
+        game_val = ctk.CTkLabel(
+            self.facts_row, text="-", anchor="w", justify="left")
+        game_val.grid(row=0, column=3, sticky="ew")
+        self.info_rows = {
+            "mod": self.drop_label,
+            "outfit": outfit_val,
+            "game": game_val,
+        }
 
-        drop_text = ("Drop mod folder(s) or .zip / .rar / .7z archive(s) here"
-                     if HAS_DND else "Select a mod folder or archive")
-        self.drop_label = ctk.CTkLabel(
-            top, text=drop_text, font=ctk.CTkFont(size=15, weight="bold"),
-            height=48)
-        self.drop_label.grid(row=0, column=0, sticky="nsew", padx=14, pady=(10, 0))
-
-        self.path_label = ctk.CTkLabel(top, text="No mod loaded", text_color=DIM)
-        self.path_label.grid(row=1, column=0, sticky="ew", padx=14)
-
-        btns = ctk.CTkFrame(top, fg_color="transparent")
-        btns.grid(row=2, column=0, pady=(4, 10))
-        ctk.CTkButton(btns, text="Browse Folder...", width=140,
-                      command=self._browse_folder).pack(side="left", padx=6)
-        ctk.CTkButton(btns, text="Browse Archive...", width=140,
-                      command=self._browse_archive).pack(side="left", padx=6)
-
-        mid = ctk.CTkFrame(self, corner_radius=12)
-        mid.grid(row=2, column=0, sticky="ew", padx=14, pady=4)
-        mid.grid_columnconfigure(1, weight=1)
-
-        ctk.CTkLabel(mid, text="ANALYSIS", font=ctk.CTkFont(size=12, weight="bold"),
-                     text_color=DIM).grid(row=0, column=0, columnspan=2,
-                                          sticky="w", padx=14, pady=(8, 2))
-
-        self.info_rows = {}
-        for i, (key, label) in enumerate([
-            ("mod", "Mod"),
-            ("outfit", "Outfits"),
-        ], start=1):
-            ctk.CTkLabel(mid, text=label, width=140, anchor="w",
-                         text_color=DIM).grid(row=i, column=0, sticky="nw",
-                                              padx=(14, 8), pady=2)
-            val = ctk.CTkLabel(mid, text="-", anchor="w", justify="left")
-            val.grid(row=i, column=1, sticky="ew", padx=(0, 14), pady=2)
-            self.info_rows[key] = val
-
-        out = ctk.CTkFrame(mid, fg_color="transparent")
-        out.grid(row=3, column=0, columnspan=2, sticky="ew", padx=14, pady=(8, 10))
+        out = ctk.CTkFrame(mod, fg_color="transparent")
+        out.grid(row=4, column=0, sticky="ew", padx=20, pady=(18, 18))
         out.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(out, text="Output folder", width=140, anchor="w",
-                     text_color=DIM).grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(
+            out, text="Output", width=72, anchor="w", text_color=DIM,
+            font=fact_font,
+        ).grid(row=0, column=0, sticky="w")
         self.out_var = tk.StringVar(value=initial_output_dir(self.settings))
-        self.out_entry = ctk.CTkEntry(out, textvariable=self.out_var)
-        self.out_entry.grid(row=0, column=1, sticky="ew", padx=(8, 6))
-        ctk.CTkButton(out, text="...", width=36,
-                      command=self._browse_output).grid(row=0, column=2)
+        self.out_entry = ctk.CTkEntry(out, textvariable=self.out_var, height=32)
+        self.out_entry.grid(row=0, column=1, sticky="ew", padx=(8, 8))
+        _quiet_button(
+            out, "...", self._browse_output, width=36,
+        ).grid(row=0, column=2)
 
-        bottom = ctk.CTkFrame(self, corner_radius=12)
-        bottom.grid(row=3, column=0, sticky="nsew", padx=14, pady=(4, 12))
+        bottom = ctk.CTkFrame(self, corner_radius=16)
+        bottom.grid(row=2, column=0, sticky="nsew", padx=20, pady=(0, 18))
         bottom.grid_columnconfigure(0, weight=1)
 
         conv = ctk.CTkFrame(bottom, fg_color="transparent")
-        conv.grid(row=0, column=0, sticky="ew", padx=14, pady=(12, 4))
+        conv.grid(row=0, column=0, sticky="ew", padx=20, pady=(18, 4))
         conv.grid_columnconfigure(0, weight=1)
 
-        self.from_label = ctk.CTkLabel(conv, text="Convert from", anchor="w")
+        self.from_label = ctk.CTkLabel(
+            conv, text="Convert from", anchor="w", text_color=DIM,
+            font=ctk.CTkFont(size=12))
         self.from_label.grid(row=0, column=0, sticky="w")
 
         # Sizes to content and wraps; avoids a tall empty scroll area.
         self.from_checks_frame = ctk.CTkFrame(conv, fg_color="transparent")
-        self.from_checks_frame.grid(row=1, column=0, sticky="ew", pady=(4, 2))
+        self.from_checks_frame.grid(row=1, column=0, sticky="ew", pady=(6, 2))
 
-        to_row = ctk.CTkFrame(conv, fg_color="transparent")
-        to_row.grid(row=2, column=0, sticky="ew", pady=(8, 0))
-        ctk.CTkLabel(to_row, text="Convert to", anchor="w", width=100).pack(
-            side="left")
+        menus = ctk.CTkFrame(conv, fg_color="transparent")
+        self.menus_row = menus
+        menus.grid(row=2, column=0, sticky="ew", pady=(12, 0))
+        menus.grid_columnconfigure(0, weight=1)
+        menus.grid_columnconfigure(1, weight=1)
+
+        self.to_col = ctk.CTkFrame(menus, fg_color="transparent")
+        self.to_col.grid(row=0, column=0, sticky="ew", padx=(0, 12))
+        self.to_col.grid_columnconfigure(0, weight=1)
+        self.to_label = ctk.CTkLabel(
+            self.to_col, text="Convert to", anchor="w", text_color=DIM,
+            font=ctk.CTkFont(size=12))
+        self.to_label.grid(row=0, column=0, sticky="w")
         to_labels = self._to_menu_values()
         self.to_var = tk.StringVar(value=to_labels[0] if to_labels else "-")
         self.to_menu = ctk.CTkOptionMenu(
-            to_row, variable=self.to_var,
-            values=to_labels or ["-"], width=260,
+            self.to_col, variable=self.to_var,
+            values=to_labels or ["-"], width=240,
             state="disabled",
             command=self._on_target_outfit_changed)
-        self.to_menu.pack(side="left", padx=(8, 0))
+        self.to_menu.grid(row=1, column=0, sticky="ew", pady=(6, 0))
+
+        self.game_col = ctk.CTkFrame(menus, fg_color="transparent")
+        self.game_col.grid(row=0, column=1, sticky="ew")
+        self.game_col.grid_columnconfigure(0, weight=1)
+        self.game_label = ctk.CTkLabel(
+            self.game_col, text="Game build", anchor="w", text_color=DIM,
+            font=ctk.CTkFont(size=12))
+        self.game_label.grid(row=0, column=0, sticky="w")
+        self.game_var = tk.StringVar(value=GAME_BUILDS[0])
+        self.game_menu = ctk.CTkOptionMenu(
+            self.game_col, variable=self.game_var,
+            values=list(GAME_BUILDS), width=220,
+            state="disabled")
+        self.game_menu.grid(row=1, column=0, sticky="ew", pady=(6, 0))
+        self.game_var.trace_add(
+            "write", lambda *_args: self._sync_build_direction())
+
+        self.build_direction = ctk.CTkLabel(
+            conv, text="", anchor="w",
+            font=ctk.CTkFont(size=13))
+        self.build_hint = ctk.CTkLabel(
+            conv,
+            text=(
+                "Meshes and materials use Blender; prefabs and physics "
+                "chains are copied, not rewritten."
+            ),
+            text_color=DIM, anchor="w",
+            font=ctk.CTkFont(size=11), justify="left")
 
         opts = ctk.CTkFrame(bottom, fg_color="transparent")
-        opts.grid(row=1, column=0, sticky="ew", padx=14, pady=(6, 4))
+        opts.grid(row=1, column=0, sticky="ew", padx=20, pady=(8, 4))
         opts.grid_columnconfigure(0, weight=1)
 
         name_row = ctk.CTkFrame(opts, fg_color="transparent")
+        self.name_row = name_row
         name_row.grid(row=0, column=0, sticky="ew")
         name_row.grid_columnconfigure(0, weight=1)
 
@@ -266,15 +438,19 @@ class App(_Root):
         self._bind_tooltip(
             self.set_name_cb,
             "Sets the costume-select name shown in-game.\n"
-            "Works for Elza, Noir, and Military on Convert.\n"
-            "Jacket / Tank Top / Classic Jacket / Classic Tank Top\n"
-            "share one name file — use Costume names instead.")
+            "Claire: Elza / Noir / Military on Convert.\n"
+            "Leon: Noir / Arklay Sheriff on Convert.\n"
+            "Base Jacket/Tank/Classic* and Leon Casual/Police*\n"
+            "share name files — use Costume names instead.\n"
+            "<COLOR FF4040>Name</COLOR> previews that color here.")
 
         self.outfit_name_var = tk.StringVar(value="")
         self.outfit_name_entry = ctk.CTkEntry(
             name_row, textvariable=self.outfit_name_var,
             placeholder_text="In-game outfit name", height=28,
             state="disabled")
+        self._outfit_name_default_color = (
+            ctk.ThemeManager.theme["CTkEntry"]["text_color"])
         # Always gridded so Convert-to switches don't resize the window.
         self.outfit_name_entry.grid(
             row=1, column=0, sticky="ew", pady=(8, 0))
@@ -289,11 +465,12 @@ class App(_Root):
             bottom, text="Convert", height=42, state="disabled",
             fg_color=CONVERT, hover_color=CONVERT_HOVER,
             font=ctk.CTkFont(size=15, weight="bold"),
-            command=self._start_convert)
-        self.convert_btn.grid(row=2, column=0, sticky="ew", padx=14, pady=(8, 8))
+            command=self._on_convert_click)
+        self.convert_btn.grid(
+            row=2, column=0, sticky="ew", padx=20, pady=(10, 8))
 
         progress_row = ctk.CTkFrame(bottom, fg_color="transparent")
-        progress_row.grid(row=3, column=0, sticky="ew", padx=14, pady=(0, 12))
+        progress_row.grid(row=3, column=0, sticky="ew", padx=20, pady=(0, 16))
         progress_row.grid_columnconfigure(0, weight=1)
 
         self.progress_bar = ctk.CTkProgressBar(
@@ -314,14 +491,14 @@ class App(_Root):
 
     # -------------------------------------------------------------- helpers
 
-    def _skip_convert_confirm(self) -> bool:
-        return bool(self.settings.get("skip_convert_confirm", False))
-
     def _skip_completion_dialog(self) -> bool:
         return bool(self.settings.get("skip_completion_dialog", False))
 
-    def _tag_output_enabled(self) -> bool:
-        return bool(self.settings.get("tag_output", True))
+    def _tag_zip_enabled(self) -> bool:
+        return bool(self.settings.get("tag_zip_name", True))
+
+    def _tag_description_enabled(self) -> bool:
+        return bool(self.settings.get("tag_modinfo_description", True))
 
     def _restore_geometry(self):
         geo = str(self.settings.get("window_geometry", "")).strip()
@@ -331,7 +508,7 @@ class App(_Root):
                 return
             except tk.TclError:
                 pass
-        self.geometry("820x680")
+        self.geometry("920x720")
 
     def _capture_geometry(self):
         try:
@@ -374,17 +551,74 @@ class App(_Root):
 
     def _update_wraplengths(self):
         try:
-            width = max(240, self.winfo_width() - 200)
+            width = max(280, self.winfo_width() - 80)
         except tk.TclError:
             return
         if abs(width - self._last_wrap_width) < 24:
             return
         self._last_wrap_width = width
-        for label in self.info_rows.values():
+        for label in [
+            self.drop_label, self.path_label,
+            self.info_rows["outfit"], self.info_rows["game"],
+            self.build_direction, self.build_hint,
+        ]:
             try:
                 label.configure(wraplength=width)
             except tk.TclError:
                 pass
+
+    def _is_game_build_mode(self) -> bool:
+        return is_game_build_load(m.analysis for m in self.loaded)
+
+    def _apply_ui_mode(self) -> None:
+        game = self._is_game_build_mode()
+        if game:
+            self.from_label.grid_remove()
+            self.from_checks_frame.grid_remove()
+            self.name_row.grid_remove()
+            self.name_hint.grid_remove()
+            self.names_btn.pack_forget()
+            self.build_direction.grid(
+                row=3, column=0, sticky="ew", pady=(8, 0))
+            self.build_hint.grid(
+                row=4, column=0, sticky="ew", pady=(2, 0))
+        else:
+            self.from_label.grid(row=0, column=0, sticky="w")
+            self.from_checks_frame.grid(
+                row=1, column=0, sticky="ew", pady=(4, 2))
+            self.name_row.grid(row=0, column=0, sticky="ew")
+            self.name_hint.grid(row=1, column=0, sticky="ew", pady=(1, 0))
+            if not self.names_btn.winfo_ismapped():
+                self.names_btn.pack(
+                    side="left", padx=(0, 8), before=self._gear_btn)
+            self.build_direction.grid_remove()
+            self.build_hint.grid_remove()
+        self._layout_to_row(game)
+        self._sync_build_direction()
+        self._sync_convert_button()
+
+    def _layout_to_row(self, game: bool) -> None:
+        self.to_col.grid_remove()
+        self.game_col.grid_remove()
+        if game:
+            self.game_col.grid(row=0, column=0, sticky="ew")
+        else:
+            self.to_col.grid(row=0, column=0, sticky="ew", padx=(0, 12))
+            self.game_col.grid(row=0, column=1, sticky="ew")
+
+    def _sync_build_direction(self) -> None:
+        if not self._is_game_build_mode():
+            return
+        if not hasattr(self, "build_direction"):
+            return
+        detected = "-"
+        if self.loaded:
+            detected = game_label_for(m.analysis for m in self.loaded)
+        chosen = self.game_var.get()
+        if chosen not in GAME_BUILDS:
+            chosen = GAME_BUILDS[0]
+        self.build_direction.configure(
+            text=game_build_direction(detected, chosen))
 
     def _save_settings(self):
         self._capture_geometry()
@@ -411,19 +645,26 @@ class App(_Root):
                     f"Output folder is not available:\n{out}")
                 return
 
-        def on_created(path: Path):
+        def on_created(path: Path, updated: bool):
             self.out_var.set(str(path.parent))
             self._save_settings()
+            verb = "updated" if updated else "created"
             if self._skip_completion_dialog():
                 self.status_label.configure(
-                    text=f"Name pack created: {path.name}",
+                    text=f"Name pack {verb}: {path.name}",
                     text_color=OK_COLOR)
+            elif updated:
+                tk.messagebox.showinfo(
+                    "Costume names",
+                    f"Updated Fluffy name pack:\n{path}\n\n"
+                    "The same folder was updated. If the menu text does not "
+                    "change, disable and enable that folder once in Fluffy.")
             else:
                 tk.messagebox.showinfo(
                     "Costume names",
                     f"Created Fluffy name pack:\n{path}\n\n"
-                    "Enable this mod in Fluffy to apply the costume-menu "
-                    "names. Use only one such name pack at a time.")
+                    "Enable this folder in Fluffy. Later saves update the "
+                    "files inside it.")
 
         open_name_pack_dialog(self, output_dir=out, on_created=on_created)
 
@@ -476,8 +717,25 @@ class App(_Root):
     def _outfit_menu_label(self, outfit) -> str:
         return outfit_menu_label(self.settings, outfit)
 
+    def _active_character(self) -> str:
+        """Character key for From/To menus (loaded pack, else Claire idle)."""
+        if self.loaded:
+            for m in self.loaded:
+                key = m.analysis.character_key
+                if key:
+                    return key
+            for m in self.loaded:
+                outfits = m.analysis.outfits or m.analysis.claire_outfits
+                if outfits:
+                    return outfits[0].character
+        return "claire"
+
+    def _menu_outfits(self) -> list[Outfit]:
+        return convertible_outfits_for(self._active_character())
+
     def _outfit_from_menu_label(self, label: str):
-        return outfit_from_menu_label(self.settings, label)
+        return outfit_from_menu_label(
+            self.settings, label, character=self._active_character())
 
     def _delete_action_available(self) -> bool:
         """Delete only makes sense when the pack has more than one outfit slot."""
@@ -486,7 +744,8 @@ class App(_Root):
         return len(self._convertible_source_outfits()) > 1
 
     def _to_menu_values(self) -> list[str]:
-        labels = list(outfit_menu_labels(self.settings))
+        labels = list(outfit_menu_labels(
+            self.settings, character=self._active_character()))
         if self._delete_action_available():
             if DELETE_ACTION not in labels:
                 labels.append(DELETE_ACTION)
@@ -496,11 +755,11 @@ class App(_Root):
         """Clear stored Delete targets when Delete is not offered."""
         if self._delete_action_available():
             return
+        menu = {o.key: o for o in self._menu_outfits()}
         for key, choice in list(self._outfit_to_choice.items()):
             if not str(choice).startswith("Delete"):
                 continue
-            outfit = next(
-                (o for o in CONVERTIBLE_OUTFITS if o.key == key), None)
+            outfit = menu.get(key)
             if outfit is not None:
                 self._outfit_to_choice[key] = self._outfit_menu_label(outfit)
 
@@ -548,18 +807,21 @@ class App(_Root):
     def _convertible_source_outfits(self) -> list[Outfit]:
         detected: set[str] = set()
         for m in self.loaded:
-            for o in m.analysis.claire_outfits:
+            outfits = m.analysis.outfits or m.analysis.claire_outfits
+            for o in outfits:
                 if is_convertible_outfit(o):
                     detected.add(o.key)
-        return [o for o in CONVERTIBLE_OUTFITS if o.key in detected]
+        menu = self._menu_outfits()
+        return [o for o in menu if o.key in detected]
 
     def _from_check_outfits(self) -> list[Outfit]:
         """Outfits shown as From checkboxes (detected, or all while idle)."""
+        menu = self._menu_outfits()
         if not self.loaded:
-            return list(CONVERTIBLE_OUTFITS)
+            return list(menu)
         detected = self._convertible_source_outfits()
         # Keep the same strip layout even when nothing is convertible.
-        return detected if detected else list(CONVERTIBLE_OUTFITS)
+        return detected if detected else list(menu)
 
     def _show_idle_convert_ui(self) -> None:
         """Idle / no-mod convert strip — same layout, clickable, convert locked."""
@@ -569,12 +831,29 @@ class App(_Root):
         self._outfit_to_choice.clear()
         self._active_source_key = None
         self._suggested_outfit_name = ""
+        self._names_by_outfit_key = {}
+        self._name_generic = ""
         self._filling_name = True
         self.outfit_name_var.set("")
         self._filling_name = False
         self._name_user_edited = False
         self._refresh_to_menu()
+        self.game_var.set(GAME_BUILDS[0])
+        self.game_menu.configure(state="disabled")
+        self._show_idle_mod_card()
         self._rebuild_from_checks(select_first=True)
+        self._apply_ui_mode()
+
+    def _show_idle_mod_card(self) -> None:
+        self.drop_label.configure(
+            text="Drop a mod", anchor="center", justify="center",
+            font=self._idle_headline_font)
+        self.path_label.grid()
+        self.path_label.configure(
+            text=self._idle_subtitle, anchor="center", justify="center")
+        self.info_rows["outfit"].configure(text="-")
+        self.info_rows["game"].configure(text="-")
+        self.facts_row.grid_remove()
 
     def _clear_from_checks(self) -> None:
         for child in self.from_checks_frame.winfo_children():
@@ -656,7 +935,7 @@ class App(_Root):
             })
             if outfit.key not in self._outfit_display_names:
                 self._outfit_display_names[outfit.key] = (
-                    self._suggested_outfit_name or label)
+                    self._name_seed_for(outfit.key) or label)
             if outfit.key not in self._outfit_to_choice:
                 self._outfit_to_choice[outfit.key] = (
                     self._outfit_menu_label(outfit))
@@ -721,7 +1000,7 @@ class App(_Root):
 
         if not checked:
             self.to_menu.configure(state="disabled")
-            self.convert_btn.configure(state="disabled")
+            self._sync_convert_button()
             self._sync_name_ui()
             return
 
@@ -730,13 +1009,7 @@ class App(_Root):
             active = self._active_source_key
 
         self.to_menu.configure(state="normal")
-        can_convert = bool(
-            self.loaded
-            and not self._busy
-            and self._convertible_source_outfits()
-        )
-        self.convert_btn.configure(
-            state="normal" if can_convert else "disabled")
+        self._sync_convert_button()
         to_choice = self._outfit_to_choice.get(active)
         if to_choice and to_choice.startswith("Delete"):
             to_choice = DELETE_ACTION
@@ -791,6 +1064,13 @@ class App(_Root):
         return [
             r["outfit"] for r in self._from_checks if bool(r["var"].get())
         ]
+
+    def _name_seed_for(self, key: str) -> str:
+        return (
+            self._names_by_outfit_key.get(key)
+            or self._name_generic
+            or self._suggested_outfit_name
+        )
 
     def _persist_active_name(self) -> None:
         key = self._active_source_key
@@ -851,7 +1131,20 @@ class App(_Root):
         self._sync_name_ui()
         self._save_settings()
 
+    def _paint_outfit_name(self) -> None:
+        """Match the costume-names box: a leading color tag tints the text."""
+        entry = getattr(self, "outfit_name_entry", None)
+        if entry is None:
+            return
+        color = preview_hex_for_name(self.outfit_name_var.get())
+        try:
+            entry.configure(
+                text_color=color or self._outfit_name_default_color)
+        except tk.TclError:
+            pass
+
     def _on_outfit_name_typed(self, *_args):
+        self._paint_outfit_name()
         if not getattr(self, "outfit_name_entry", None):
             return
         if getattr(self, "_filling_name", False):
@@ -868,6 +1161,7 @@ class App(_Root):
         self.outfit_name_entry.configure(placeholder_text=placeholder)
         if not enabled:
             self.outfit_name_entry.configure(state="disabled")
+        self._paint_outfit_name()
 
     def _sync_name_ui(self):
         # Name applies to the focused From row's Convert-to target only.
@@ -914,6 +1208,8 @@ class App(_Root):
     def _refresh_suggested_name(self):
         if not self.loaded:
             self._suggested_outfit_name = ""
+            self._names_by_outfit_key = {}
+            self._name_generic = ""
             self._outfit_display_names.clear()
             self._outfit_name_edited.clear()
             self._outfit_to_choice.clear()
@@ -926,13 +1222,19 @@ class App(_Root):
             (m for m in self.loaded if not m.analysis.modinfo.addonfor),
             self.loaded[0])
         fallback = package_label(primary.analysis, primary.source)
+        by_key = primary.analysis.english_names_by_outfit_key()
+        generic = primary.analysis.modinfo.name.strip() or fallback
+        self._names_by_outfit_key = by_key
+        self._name_generic = generic
+        # The field for one outfit. Other rows keep their own file, or the
+        # mod name — not this string.
+        focused = self._selected_source_outfit()
+        focused_key = focused.key if focused is not None else None
         self._suggested_outfit_name = (
-            primary.analysis.suggested_outfit_display_name(fallback)
-            or fallback)
-        # Seed per-outfit names with the mod suggestion (separate slots can diverge).
+            by_key.get(focused_key or "", "") or generic)
         for outfit in self._convertible_source_outfits():
             self._outfit_display_names.setdefault(
-                outfit.key, self._suggested_outfit_name)
+                outfit.key, by_key.get(outfit.key) or generic)
             self._outfit_name_edited.setdefault(outfit.key, False)
         self._load_active_name()
 
@@ -944,7 +1246,10 @@ class App(_Root):
         self.loaded.clear()
 
     def _suggest_bundle_name(self) -> str:
-        mains = [m for m in self.loaded if m.analysis.claire_outfits]
+        def _has_outfits(m) -> bool:
+            return bool(m.analysis.outfits or m.analysis.claire_outfits)
+
+        mains = [m for m in self.loaded if _has_outfits(m)]
         if not mains:
             mains = [m for m in self.loaded if not m.analysis.modinfo.addonfor]
         if mains:
@@ -990,11 +1295,11 @@ class App(_Root):
         if self._busy or not paths:
             return
         self._busy = True
-        self.convert_btn.configure(state="disabled")
-        if len(paths) == 1:
-            self.path_label.configure(text=str(paths[0]))
-        else:
-            self.path_label.configure(text=f"{len(paths)} items selected...")
+        self._sync_convert_button()
+        self.drop_label.configure(
+            text="Reading…", anchor="w", justify="left",
+            font=self._loaded_headline_font)
+        self.path_label.grid_remove()
         threading.Thread(target=self._analyze_worker_safe, args=(paths,),
                          daemon=True).start()
 
@@ -1023,13 +1328,15 @@ class App(_Root):
         infos = infos or []
 
         if not loaded:
-            self.path_label.configure(text="No mod loaded")
-            for key in self.info_rows:
-                self.info_rows[key].configure(text="-")
             self._show_idle_convert_ui()
             msg = "\n".join(errors) if errors else "No valid mods found."
             tk.messagebox.showerror("Could not load mod", msg)
             return
+
+        self.drop_label.configure(
+            anchor="w", justify="left", font=self._loaded_headline_font)
+        self.path_label.grid_remove()
+        self.facts_row.grid()
 
         if len(loaded) == 1:
             self._show_single_analysis(loaded[0])
@@ -1043,35 +1350,31 @@ class App(_Root):
         self._active_source_key = None
         self._refresh_suggested_name()
         self._refresh_to_menu()
+        self._sync_game_build()
         self._rebuild_from_checks(select_first=True)
-        if not self._convertible_source_outfits():
-            self.convert_btn.configure(state="disabled")
+        self._apply_ui_mode()
 
         if errors:
             tk.messagebox.showwarning(
                 "Some mods skipped",
                 "Could not load every selected file:\n\n" + "\n".join(errors[:12]))
         elif infos:
+            self.path_label.grid()
             self.path_label.configure(
-                text=self.path_label.cget("text") + "  ·  " + infos[0])
+                text=infos[0], anchor="w", justify="left")
 
     def _show_single_analysis(self, item: LoadedMod):
         analysis = item.analysis
-        source = item.source
-        self.path_label.configure(text=str(source.original))
-        self.info_rows["mod"].configure(text=format_mod_row(analysis, source))
+        self.info_rows["mod"].configure(
+            text=format_mod_row(analysis, item.source))
         outfit_text, outfit_ok = format_outfit_row(analysis)
         self.info_rows["outfit"].configure(
             text=outfit_text,
             text_color=OK_COLOR if outfit_ok else WARN_COLOR)
+        self._show_game_label(analysis.game_label)
 
     def _show_multi_analysis(self, loaded: list[LoadedMod]):
-        mains = [m for m in loaded if not m.analysis.modinfo.addonfor]
-        addons = [m for m in loaded if m.analysis.modinfo.addonfor]
         names = [package_label(m.analysis, m.source) for m in loaded]
-        self.path_label.configure(
-            text=f"{len(loaded)} mods loaded  ·  "
-                 f"{len(mains)} main, {len(addons)} addon")
         preview = ", ".join(names[:4])
         if len(names) > 4:
             preview += f", +{len(names) - 4} more"
@@ -1081,6 +1384,19 @@ class App(_Root):
         self.info_rows["outfit"].configure(
             text=outfit_text,
             text_color=OK_COLOR if outfit_ok else WARN_COLOR)
+        self._show_game_label(game_label_for(
+            m.analysis for m in loaded))
+
+    def _show_game_label(self, text: str) -> None:
+        self.info_rows["game"].configure(
+            text=text,
+            text_color=OK_COLOR if text != "-" else DIM)
+
+    def _sync_game_build(self) -> None:
+        choice = game_build_for(m.analysis for m in self.loaded)
+        self.game_var.set(choice)
+        self.game_menu.configure(state="normal")
+        self._sync_build_direction()
 
     # ------------------------------------------------------------- convert
 
@@ -1099,7 +1415,146 @@ class App(_Root):
         self._save_settings()
         return out_path
 
+    def _on_convert_click(self):
+        if self._converting:
+            self._request_cancel()
+            return
+        self._start_convert()
+
+    def _request_cancel(self):
+        if not self._converting:
+            return
+        request_cancel()
+        self._sync_convert_button()
+        self.status_label.configure(text="Cancelling...", text_color=DIM)
+
+    def _sync_convert_button(self) -> None:
+        if self._converting:
+            if cancel_requested():
+                self.convert_btn.configure(state="disabled", text="Cancelling...")
+            else:
+                self.convert_btn.configure(state="normal", text="Cancel")
+            return
+        if self._is_game_build_mode():
+            can = bool(self.loaded and not self._busy)
+            self.convert_btn.configure(
+                state="normal" if can else "disabled", text="Convert")
+            return
+        checked = self._checked_source_outfits()
+        can = bool(
+            checked
+            and self.loaded
+            and not self._busy
+            and self._convertible_source_outfits()
+        )
+        self.convert_btn.configure(
+            state="normal" if can else "disabled", text="Convert")
+
+    def _end_convert_ui(self) -> None:
+        self._converting = False
+        self._busy = False
+        reset_cancel()
+        self._sync_convert_button()
+
+    def _discard_output(self, report) -> None:
+        paths: list[Path] = []
+        if isinstance(report, BatchReport):
+            if report.output_zip is not None:
+                paths.append(report.output_zip)
+        elif report is not None:
+            if getattr(report, "output_zip", None) is not None:
+                paths.append(report.output_zip)
+            if getattr(report, "output_folder", None) is not None:
+                paths.append(report.output_folder)
+        for path in paths:
+            try:
+                if path.is_file():
+                    path.unlink()
+                elif path.is_dir():
+                    shutil.rmtree(path)
+            except OSError:
+                pass
+
+    def _start_game_build_convert(self):
+        if self._busy or not self.loaded:
+            return
+        out_path = self._ensure_output()
+        if out_path is None:
+            return
+        chosen = self.game_var.get()
+        if chosen not in GAME_BUILDS:
+            chosen = GAME_BUILDS[0]
+        loaded = list(self.loaded)
+        write_log = bool(self.settings.get("write_convert_log", True))
+        tag_build_zip = bool(self.settings.get("tag_build_zip_name", True))
+        tag_build_desc = bool(
+            self.settings.get("tag_build_modinfo_description", True))
+        blender_settings = {
+            "use_blender": bool(self.settings.get("use_blender", True)),
+            "blender_path": str(self.settings.get("blender_path") or ""),
+        }
+        bundle_name = self._suggest_bundle_name()
+        reset_cancel()
+        self._busy = True
+        self._converting = True
+        self._sync_convert_button()
+        self._start_progress_ui()
+        threading.Thread(
+            target=self._game_build_worker_safe,
+            args=(
+                loaded, out_path, chosen, bundle_name, write_log,
+                tag_build_zip, tag_build_desc, blender_settings,
+            ),
+            daemon=True).start()
+
+    def _game_build_worker_safe(
+        self, loaded, out_path: Path, game_build: str, bundle_name: str,
+        write_log: bool, tag_build_zip: bool, tag_build_desc: bool,
+        blender_settings: dict,
+    ):
+        try:
+            self._game_build_worker(
+                loaded, out_path, game_build, bundle_name, write_log,
+                tag_build_zip, tag_build_desc, blender_settings)
+        except Exception as e:
+            self._ui_after(
+                self._convert_failed, f"Unexpected error: {e!r}")
+
+    def _game_build_worker(
+        self, loaded, out_path: Path, game_build: str, bundle_name: str,
+        write_log: bool, tag_build_zip: bool, tag_build_desc: bool,
+        blender_settings: dict,
+    ):
+        def progress(msg: str):
+            self._ui_after(self._on_progress_msg, msg)
+
+        try:
+            report = convert_game_builds(
+                loaded, out_path,
+                game_build=game_build,
+                bundle_name=bundle_name,
+                progress=progress,
+                write_log=write_log,
+                tag_build_zip_name=tag_build_zip,
+                tag_build_modinfo_description=tag_build_desc,
+                settings=blender_settings,
+            )
+            if cancel_requested():
+                self._discard_output(report)
+                raise ConversionCancelled("Convert cancelled.")
+            self._ui_after(self._convert_done, report)
+        except ConversionCancelled:
+            self._ui_after(self._convert_cancelled)
+        except (ConversionError, OSError) as e:
+            self._ui_after(self._convert_failed, str(e))
+        except Exception as e:
+            self._ui_after(
+                self._convert_failed, f"Unexpected error: {e!r}")
+
     def _start_convert(self):
+        if self._is_game_build_mode():
+            self._start_game_build_convert()
+            return
         if self._busy or not self.loaded or not self._convertible():
             return
         out_path = self._ensure_output()
@@ -1109,20 +1564,11 @@ class App(_Root):
         ops = self._collect_ops()
         if not ops:
             return
+        chosen = self.game_var.get()
+        if chosen not in GAME_BUILDS:
+            chosen = GAME_BUILDS[0]
 
         converts = [op for op in ops if op.target is not None]
-        identity = [
-            op for op in converts if op.source.key == op.target.key  # type: ignore[union-attr]
-        ]
-        if identity and not self._skip_convert_confirm():
-            names = ", ".join(op.source.name for op in identity)
-            if not tk.messagebox.askokcancel(
-                    "Confirm conversion",
-                    f"Convert on {names} to itself?\n\n"
-                    "Face and hair will be isolated so this mod won't "
-                    "conflict with other Claire outfits."):
-                return
-
         namable_ops = [
             op for op in converts
             if is_convert_namable(op.target)
@@ -1156,22 +1602,35 @@ class App(_Root):
         # Snapshot UI-thread state before the worker starts (Tk vars are
         # not safe to read from background threads).
         loaded = list(self.loaded)
-        tag_output = self._tag_output_enabled()
+        tag_output = self._tag_zip_enabled()
+        tag_modinfo_description = self._tag_description_enabled()
+        tag_modinfo_name = False
         tag_marker = tag_marker_for(self.settings, package_target)
         strip_tags = strip_tag_markers(self.settings)
         bundle_name = self._suggest_bundle_name()
         source_outfit = ops[0].source
         write_log = bool(self.settings.get("write_convert_log", True))
+        tag_build_zip = bool(self.settings.get("tag_build_zip_name", True))
+        tag_build_desc = bool(
+            self.settings.get("tag_build_modinfo_description", True))
+        blender_settings = {
+            "use_blender": bool(self.settings.get("use_blender", True)),
+            "blender_path": str(self.settings.get("blender_path") or ""),
+        }
 
+        reset_cancel()
         self._busy = True
-        self.convert_btn.configure(state="disabled", text="Converting...")
+        self._converting = True
+        self._sync_convert_button()
         self._start_progress_ui()
         threading.Thread(
             target=self._convert_worker_safe,
             args=(
                 loaded, ops, source_outfit, package_target, out_path,
                 outfit_display_name, outfit_display_names, tag_output,
+                tag_modinfo_description, tag_modinfo_name,
                 tag_marker, strip_tags, bundle_name, write_log,
+                chosen, tag_build_zip, tag_build_desc, blender_settings,
             ),
             daemon=True).start()
 
@@ -1211,15 +1670,22 @@ class App(_Root):
         self, loaded, ops, source_outfit, package_target, out_path: Path,
         outfit_display_name: str | None,
         outfit_display_names: dict[str, str] | None,
-        tag_output: bool, tag_marker: str,
+        tag_output: bool, tag_modinfo_description: bool, tag_modinfo_name: bool,
+        tag_marker: str,
         strip_tags: list[str], bundle_name: str,
         write_log: bool,
+        game_build: str,
+        tag_build_zip: bool,
+        tag_build_desc: bool,
+        blender_settings: dict,
     ):
         try:
             self._convert_worker(
                 loaded, ops, source_outfit, package_target, out_path,
                 outfit_display_name, outfit_display_names, tag_output,
-                tag_marker, strip_tags, bundle_name, write_log)
+                tag_modinfo_description, tag_modinfo_name,
+                tag_marker, strip_tags, bundle_name, write_log,
+                game_build, tag_build_zip, tag_build_desc, blender_settings)
         except Exception as e:
             self._ui_after(
                 self._convert_failed, f"Unexpected error: {e!r}")
@@ -1228,9 +1694,14 @@ class App(_Root):
         self, loaded, ops, source_outfit, package_target, out_path: Path,
         outfit_display_name: str | None,
         outfit_display_names: dict[str, str] | None,
-        tag_output: bool, tag_marker: str,
+        tag_output: bool, tag_modinfo_description: bool, tag_modinfo_name: bool,
+        tag_marker: str,
         strip_tags: list[str], bundle_name: str,
         write_log: bool,
+        game_build: str,
+        tag_build_zip: bool,
+        tag_build_desc: bool,
+        blender_settings: dict,
     ):
         def progress(msg: str):
             self._ui_after(self._on_progress_msg, msg)
@@ -1240,6 +1711,8 @@ class App(_Root):
                 loaded, source_outfit, package_target, out_path,
                 outfit_display_name=outfit_display_name,
                 tag_output=tag_output,
+                tag_modinfo_description=tag_modinfo_description,
+                tag_modinfo_name=tag_modinfo_name,
                 tag_marker=tag_marker,
                 strip_tags=strip_tags,
                 bundle_name=bundle_name,
@@ -1248,8 +1721,17 @@ class App(_Root):
                 ops=ops,
                 write_log=write_log,
                 outfit_display_names=outfit_display_names,
+                game_build=game_build,
+                tag_build_zip_name=tag_build_zip,
+                tag_build_modinfo_description=tag_build_desc,
+                settings=blender_settings,
             )
+            if cancel_requested():
+                self._discard_output(report)
+                raise ConversionCancelled("Convert cancelled.")
             self._ui_after(self._convert_done, report)
+        except ConversionCancelled:
+            self._ui_after(self._convert_cancelled)
         except (ConversionError, OSError) as e:
             self._ui_after(self._convert_failed, str(e))
         except Exception as e:
@@ -1257,20 +1739,23 @@ class App(_Root):
                 self._convert_failed, f"Unexpected error: {e!r}")
 
     def _on_progress_msg(self, msg: str):
+        if not self._converting or cancel_requested():
+            return
         short = msg if len(msg) <= 72 else msg[:69] + "..."
         self.status_label.configure(text=short, text_color=DIM)
 
+    def _convert_cancelled(self):
+        self._end_convert_ui()
+        self._reset_progress_ui()
+        self.status_label.configure(text="Convert cancelled", text_color=DIM)
+
     def _convert_failed(self, msg: str):
-        self._busy = False
-        self.convert_btn.configure(
-            state="normal" if self._convertible() else "disabled",
-            text="Convert")
+        self._end_convert_ui()
         self._reset_progress_ui()
         tk.messagebox.showerror("Conversion failed", msg)
 
     def _convert_done(self, report=None):
-        self._busy = False
-        self.convert_btn.configure(state="normal", text="Convert")
+        self._end_convert_ui()
         try:
             self.progress_bar.stop()
         except Exception:

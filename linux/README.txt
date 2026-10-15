@@ -2,7 +2,7 @@ RE2 Outfit Converter (Linux)
 ============================
 
 Same GUI and conversion engine as the Windows app. Converts RE2 Remake Claire
-outfit mods between slots. Your original mod is never changed.
+and Leon outfit mods between slots. Your original mod is never changed.
 
 Quick start
 -----------
@@ -24,5 +24,9 @@ Prefer .zip mods. For .rar / .7z, install p7zip so "7z" is on PATH.
 
 Costume names (header button) builds a small Fluffy pack that renames Claire
 and Leon costume slots that share one name file. Leave a slot blank for vanilla.
+If Costume Name Pack.zip is already in the output folder, the editor loads it
+and Save updates that zip. The dialog remembers its last position. Esc closes it.
+
+Settings is the gear in the header.
 
 Drop the output .zip into Fluffy's RE2R Mods folder — do not extract it.
