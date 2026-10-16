@@ -18,6 +18,7 @@ from .outfits import (
     LEON_SHARED_IDS,
     RESERVED_MESH_IDS,
     Outfit,
+    patchable,
 )
 from .paths import engine_dir, engine_path, mesh_roots, resolve_ci
 from .reports import ConversionError, ConversionReport
@@ -562,6 +563,88 @@ def alias_standard_mesh_paths(
                 std_old = f"{prefix}/{old_id}/{old_id}{kind}"
                 if len(std_old) == len(new_eng):
                     rename_map[std_old] = new_eng
+# Shared maps the jacket (and the other Claire bodies) reference from the
+# pak. A folder rewrite sends them to the new id, where the pak has no copy,
+# and the body does not draw. Chain and holster maps are named with the
+# source id; detail maps are not.
+_SHARED_DETAIL_TEXTURES = frozenset({
+    "cloth_nrm.tex",
+    "cotton_detail_nrm.tex",
+    "cotton2_detail_nrm.tex",
+    "jeans_detail_nrm.tex",
+    "leather_detail_nrm.tex",
+})
+_MAX_PATH_SCAN_BYTES = 32 * 1024 * 1024
+
+
+def _keep_unshipped_vanilla_texture(basename: str, old_id: str) -> bool:
+    low = basename.lower()
+    if low in _SHARED_DETAIL_TEXTURES:
+        return True
+    prefix = old_id.lower() + "_"
+    return low.startswith(prefix) and ("_chain_" in low or "_holster_" in low)
+
+
+def _retarget_basename_id(text: str, old_id: str, new_id: str) -> str:
+    """Swap the body id on the filename only. Leave parent folders alone."""
+    if len(old_id) != len(new_id):
+        return text
+    parent, sep, base = text.rpartition("/")
+    if not sep or not base.lower().startswith(old_id.lower()):
+        return text
+    return parent + sep + new_id + base[len(old_id):]
+
+
+def _retarget_unshipped_folder_paths(
+    staging: Path,
+    old_dir: str,
+    new_dir: str,
+    old_id: str,
+    rename_map: dict[str, str],
+) -> None:
+    """Move custom paths under ``old_dir``. Leave pak textures the mod did not ship.
+
+    A bare directory prefix also rewrites Leather, Cotton, Chain, and Holster
+    paths. Those files stay in the pak at the source folder.
+    """
+    old_l = old_dir.lower().rstrip("/")
+    token = old_l + "/"
+    known = {key.lower() for key in rename_map}
+    for path in staging.rglob("*"):
+        if not path.is_file() or not patchable(path.name):
+            continue
+        try:
+            if path.stat().st_size > _MAX_PATH_SCAN_BYTES:
+                continue
+            data = path.read_bytes()
+        except OSError:
+            continue
+        for raw in re.findall(b"(?:[\x20-\x7e]\x00){8,}", data):
+            text = raw.decode("utf-16le")
+            low = text.lower().replace("\\", "/")
+            idx = low.find(token)
+            if idx < 0:
+                continue
+            if low in known:
+                continue
+            base = low.rsplit("/", 1)[-1]
+            if _keep_unshipped_vanilla_texture(base, old_id):
+                continue
+            new_text = new_dir + text[idx + len(old_l):]
+            if idx:
+                new_text = text[:idx] + new_text
+            # The directory move renames pl1001_Top_ALBM.tex to
+            # pl1006_Top_ALBM.tex. A directory-only rewrite leaves the
+            # old id in the filename, the texture does not load, and the
+            # body does not draw. Nested folders such as pl1001_01 stay.
+            new_id = new_dir.rstrip("/").rsplit("/", 1)[-1]
+            new_text = _retarget_basename_id(new_text, old_id, new_id)
+            if len(new_text) != len(text) or new_text.lower() == low:
+                continue
+            rename_map.setdefault(text, new_text)
+            known.add(low)
+
+
 def rename_entries(root_dir: Path, staging: Path, old_id: str, new_id: str,
                     rename_map: dict[str, str],
                     report: ConversionReport,
@@ -591,7 +674,9 @@ def rename_entries(root_dir: Path, staging: Path, old_id: str, new_id: str,
                 and old_dir and new_dir and old_dir != new_dir
                 and len(old_dir) == len(new_dir)
             ):
-                rename_map.setdefault(old_dir, new_dir)
+                _retarget_unshipped_folder_paths(
+                    staging, old_dir, new_dir, old_id, rename_map,
+                )
             for rel in sorted(originals):
                 moved = dest / rel
                 final = moved

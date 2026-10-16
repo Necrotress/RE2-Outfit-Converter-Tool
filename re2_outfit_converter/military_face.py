@@ -16,7 +16,14 @@ from pathlib import Path
 
 from .analyzer import AnalysisResult
 from .outfits import Outfit
-from .paths import MESH_ROOTS, PARTS_DIR, assets_dir, ensure_dir_ci, resolve_ci
+from .paths import (
+    MESH_ROOTS,
+    PARTS_DIR,
+    assets_dir,
+    ensure_dir_ci,
+    natives_platform,
+    resolve_ci,
+)
 from .reports import ConversionReport
 
 _CLEAN_TEMPLATE = "military_face_clean"
@@ -222,6 +229,17 @@ def _seed_clean_slot(
                 f"pl1050_{_TEMPLATE_SUFFIX}", f"pl1050_{suffix}")
             dest = dest_dir / name
             shutil.copy2(src, dest)
+            if (
+                natives_platform() == "stm"
+                and dest.name.lower().endswith(".tex.10")
+            ):
+                from .platform.tex_convert import convert_tex_to_rt
+
+                rt_dest = dest.with_name(dest.name[:-len("10")] + "34")
+                rt_dest.write_bytes(
+                    convert_tex_to_rt(dest.read_bytes(), name=dest.name))
+                dest.unlink()
+                dest = rt_dest
             wrote += 1
             report.rename_ops.append(
                 f"{target.name} clean face: {src.name}  ->  "

@@ -5,7 +5,7 @@ Pipeline orchestration only — helpers live in focused sibling modules.
 Stage order in ``convert_with_ops`` (see also docs/PIPELINE.md):
 
 1. Copy mod to staging
-1a. Classic-ize a ray-tracing or dual tree when outfit stages or a Classic result need natives/x64
+1a. Classic-ize a ray-tracing or dual tree when the result is Classic, or the pack is both builds
 1b. Promote deleted-slot body assets → convert source; strip deleted outfits
 2. PFB outfit slots (per convert op)
 3. Body mesh IDs
@@ -23,19 +23,22 @@ Stage order in ``convert_with_ops`` (see also docs/PIPELINE.md):
 14b. Retarget author figure gallery (convert) / strip (delete-only)
 15. Delete DLC contentsholder
 16. Binary path patch + material hashes
-16b. Upgrade to ray tracing when Game build is Ray tracing
+16b. Upgrade to ray tracing when the pack is not already ray tracing
 17. Update modinfo
 18. Zip or folder output
 
 Same-slot with a game-build change skips steps 1b–16 except a typed
-in-game outfit name, which is still written. Classic to Classic still
-runs the full outfit stages.
+in-game outfit name, which is still written. A ray-tracing mod that
+stays ray tracing skips 1a and 16b even when the outfit slot changes;
+those outfit stages read and write natives/stm. Classic to Classic
+still runs the outfit stages and skips both platform passes.
 """
 
 from __future__ import annotations
 
 import shutil
 import tempfile
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Sequence
 
@@ -110,6 +113,7 @@ from .packaging import (
 )
 from .path_patch import patch_binaries
 from .material_hash import patch_mdf_material_hashes
+from .paths import use_natives_platform
 from .prefabs import convert_pfb_slots
 from .promote_body import promote_deleted_body_assets
 from .cancel import raise_if_cancelled
@@ -352,18 +356,18 @@ def convert_with_ops(
     chosen = game_build if game_build in GAME_BUILDS else source_analysis.game_build
     want_rt = chosen == "Ray tracing"
     identity = _same_slot_identity(requested_ops)
-    # A pure ray-tracing pack that stays ray tracing, with no slot change,
-    # is copied through. Anything else that is ray tracing or dual is made
-    # classic first so the outfit stages see natives/x64.
-    round_trip_off = (
-        identity and source_analysis.game_label == "Ray tracing" and want_rt
-    )
+    # Already ray tracing, and the menu stays ray tracing: no Blender
+    # downgrade or upgrade, even when the outfit slot changes. A dual
+    # pack is not already one build. Classic staying Classic never sets
+    # want_rt, so both platform passes stay off.
+    stay_rt = source_analysis.game_label == "Ray tracing" and want_rt
+    round_trip_off = identity and stay_rt
     skip_outfit = identity and (want_rt or source_analysis.has_rt)
     need_prepare = (
         (source_analysis.has_rt or source_analysis.is_dual_pack)
-        and not round_trip_off
+        and not stay_rt
     )
-    need_upgrade = want_rt and not round_trip_off
+    need_upgrade = want_rt and not stay_rt
     build_marker = build_tag_marker(source_analysis, chosen)
 
     # Per-package: drop From ops this pack lacks; rewrite Delete-only body
@@ -472,244 +476,269 @@ def convert_with_ops(
                 display_name, display_names,
             )
 
-        if not skip_outfit:
-            all_pfbs = _analysis_pfbs(analysis)
-            rename_map: dict[str, str] = {}
+        outfit_on_stm = stay_rt and not skip_outfit
+        with use_natives_platform("stm") if outfit_on_stm else nullcontext():
+            if not skip_outfit:
+                all_pfbs = _analysis_pfbs(analysis)
+                rename_map: dict[str, str] = {}
 
-            keep_exclusive = {
-                op.target.hair_id
-                for op in converts
-                if op.target is not None and op.target.hair_id in EXCLUSIVE_PART_IDS
-            }
+                keep_exclusive = {
+                    op.target.hair_id
+                    for op in converts
+                    if op.target is not None and op.target.hair_id in EXCLUSIVE_PART_IDS
+                }
 
-            if deletes and converts:
-                notify("Promoting deleted-slot body assets into convert source...")
-                promote_deleted_body_assets(
-                    staging, deletes, converts, rename_map, report)
+                if deletes and converts:
+                    notify("Promoting deleted-slot body assets into convert source...")
+                    promote_deleted_body_assets(
+                        staging, deletes, converts, rename_map, report)
 
-            if deletes:
-                notify("Removing deleted outfit slots...")
-                for op in deletes:
-                    strip_outfit_slot(
-                        staging, op.source, report,
-                        keep_exclusive_ids=keep_exclusive,
-                    )
+                if deletes:
+                    notify("Removing deleted outfit slots...")
+                    for op in deletes:
+                        strip_outfit_slot(
+                            staging, op.source, report,
+                            keep_exclusive_ids=keep_exclusive,
+                        )
 
-            unique_targets: list[Outfit] = []
-            seen_t: set[str] = set()
-            for op in converts:
-                assert op.target is not None
-                if op.target.key not in seen_t:
-                    seen_t.add(op.target.key)
-                    unique_targets.append(op.target)
-
-            if converts:
-                notify("Renaming PFB outfit slots...")
+                unique_targets: list[Outfit] = []
+                seen_t: set[str] = set()
                 for op in converts:
                     assert op.target is not None
-                    pfbs = [
-                        p for p in all_pfbs
-                        if p.slot in op.source.all_slots
-                    ]
-                    if pfbs:
-                        convert_pfb_slots(
-                            staging, pfbs, op.source, op.target, report,
+                    if op.target.key not in seen_t:
+                        seen_t.add(op.target.key)
+                        unique_targets.append(op.target)
+
+                if converts:
+                    notify("Renaming PFB outfit slots...")
+                    for op in converts:
+                        assert op.target is not None
+                        pfbs = [
+                            p for p in all_pfbs
+                            if p.slot in op.source.all_slots
+                        ]
+                        if pfbs:
+                            convert_pfb_slots(
+                                staging, pfbs, op.source, op.target, report,
+                                profile=profile,
+                            )
+
+                    notify("Renaming mesh folders and files...")
+                    for op in converts:
+                        assert op.target is not None
+                        if (
+                            has_mesh_entry(analysis, op.source.body_id)
+                            or body_id_on_disk(staging, op.source)
+                        ):
+                            convert_mesh_ids(
+                                staging, analysis, op.source, op.target,
+                                rename_map, report)
+
+                    notify("Removing leftover source body meshes...")
+                    for op in converts:
+                        assert op.target is not None
+                        purge_source_body_meshes(
+                            staging, [op.source], op.target, report)
+
+                    notify("Retargeting redirected custom body meshes...")
+                    for target in unique_targets:
+                        retarget_redirect_bodies(staging, target, rename_map, report)
+
+                    notify("Remapping costume-select preview...")
+                    for op in converts:
+                        assert op.target is not None
+                        convert_costume_ui(
+                            staging, [op.source], op.target, rename_map, report,
                             profile=profile,
                         )
 
-                notify("Renaming mesh folders and files...")
-                for op in converts:
-                    assert op.target is not None
-                    if (
-                        has_mesh_entry(analysis, op.source.body_id)
-                        or body_id_on_disk(staging, op.source)
+                    notify("Syncing streaming / in-game texture folders...")
+                    for target in unique_targets:
+                        sync_streaming_meshes(staging, target, report)
+
+                    primary_src = primary
+                    hair_target = next(
+                        (t for t in unique_targets
+                         if t.hair_id in EXCLUSIVE_PART_IDS),
+                        unique_targets[0],
+                    )
+
+                    for target in unique_targets:
+                        ops_for_t = [
+                            op for op in converts
+                            if op.target is not None and op.target.key == target.key
+                        ]
+                        src = ops_for_t[0].source if ops_for_t else primary_src
+                        pfbs = [
+                            p for p in all_pfbs
+                            if p.slot in src.all_slots
+                        ]
+                        notify(f"Ensuring hair / hat slot override ({target.name})...")
+                        ensure_exclusive_hair_override(
+                            staging, analysis, src, target, pfbs, report)
+
+                    if profile.key == "claire" and not any(
+                        t.key == "military" for t in unique_targets
                     ):
-                        convert_mesh_ids(
-                            staging, analysis, op.source, op.target,
-                            rename_map, report)
+                        for target in unique_targets:
+                            if target.key != "tanktop":
+                                continue
+                            notify(
+                                "Stripping Military face textures for Tank Top...")
+                            strip_tank_military_leftovers(staging, target, report)
 
-                notify("Removing leftover source body meshes...")
-                for op in converts:
-                    assert op.target is not None
-                    purge_source_body_meshes(
-                        staging, [op.source], op.target, report)
+                    notify("Isolating face/hair...")
+                    face_priv, hair_priv = isolate_claire_face_hair(
+                        staging, analysis, primary_src, hair_target,
+                        rename_map, report, keep_exclusive_ids=keep_exclusive)
 
-                notify("Retargeting redirected custom body meshes...")
-                for target in unique_targets:
-                    retarget_redirect_bodies(staging, target, rename_map, report)
+                    notify("Ensuring private hair prefab...")
+                    for target in unique_targets:
+                        hair_for_t = resolve_hair_id_for_target(
+                            staging, target, hair_priv)
+                        if hair_for_t:
+                            ensure_isolated_hair_redirect(
+                                staging, analysis, target, hair_for_t,
+                                rename_map, report)
 
-                notify("Remapping costume-select preview...")
-                for op in converts:
-                    assert op.target is not None
-                    convert_costume_ui(
-                        staging, [op.source], op.target, rename_map, report,
+                    # Costume-select preview still loads exclusive hat meshes
+                    # (Claire pl1075/pl1071, Leon pl0074/pl0075). Seed shared hair there.
+                    for target in unique_targets:
+                        if target.hair_id not in profile.exclusive_part_ids:
+                            continue
+                        hair_for_t = resolve_hair_id_for_target(
+                            staging, target, hair_priv)
+                        # Do not seed one exclusive hat from another (Noir vs Military,
+                        # or Leon Noir vs Sheriff); fall back to shared / bundled hair.
+                        hide_src = hair_for_t
+                        if (
+                            hide_src in profile.exclusive_part_ids
+                            and hide_src != target.hair_id
+                        ):
+                            hide_src = ""
+                        notify(
+                            f"Hiding exclusive hat/headband for {target.name}...")
+                        ensure_exclusive_part_mesh_hide(
+                            staging, target, hide_src, report,
+                            allow_template=not analysis.modinfo.addonfor,
+                        )
+
+                    # Overlay AddonFor hair PFBs must not stomp Main's redirect
+                    # (No Hat mesh-only; Apocalypse-style mesh+mdf without .chain).
+                    drop_mesh_only_hair_pfbs(
+                        staging, report,
+                        is_addon=bool(analysis.modinfo.addonfor),
                         profile=profile,
                     )
 
-                notify("Syncing streaming / in-game texture folders...")
-                for target in unique_targets:
-                    sync_streaming_meshes(staging, target, report)
-
-                primary_src = primary
-                hair_target = next(
-                    (t for t in unique_targets
-                     if t.hair_id in EXCLUSIVE_PART_IDS),
-                    unique_targets[0],
-                )
-
-                for target in unique_targets:
-                    ops_for_t = [
-                        op for op in converts
-                        if op.target is not None and op.target.key == target.key
-                    ]
-                    src = ops_for_t[0].source if ops_for_t else primary_src
-                    pfbs = [
-                        p for p in all_pfbs
-                        if p.slot in src.all_slots
-                    ]
-                    notify(f"Ensuring hair / hat slot override ({target.name})...")
-                    ensure_exclusive_hair_override(
-                        staging, analysis, src, target, pfbs, report)
-
-                if profile.key == "claire" and not any(
-                    t.key == "military" for t in unique_targets
-                ):
-                    for target in unique_targets:
-                        if target.key != "tanktop":
-                            continue
-                        notify(
-                            "Stripping Military face textures for Tank Top...")
-                        strip_tank_military_leftovers(staging, target, report)
-
-                notify("Isolating face/hair...")
-                face_priv, hair_priv = isolate_claire_face_hair(
-                    staging, analysis, primary_src, hair_target,
-                    rename_map, report, keep_exclusive_ids=keep_exclusive)
-
-                notify("Ensuring private hair prefab...")
-                for target in unique_targets:
-                    hair_for_t = resolve_hair_id_for_target(
-                        staging, target, hair_priv)
-                    if hair_for_t:
-                        ensure_isolated_hair_redirect(
-                            staging, analysis, target, hair_for_t,
-                            rename_map, report)
-
-                # Costume-select preview still loads exclusive hat meshes
-                # (Claire pl1075/pl1071, Leon pl0074/pl0075). Seed shared hair there.
-                for target in unique_targets:
-                    if target.hair_id not in profile.exclusive_part_ids:
-                        continue
-                    hair_for_t = resolve_hair_id_for_target(
-                        staging, target, hair_priv)
-                    # Do not seed one exclusive hat from another (Noir vs Military,
-                    # or Leon Noir vs Sheriff); fall back to shared / bundled hair.
-                    hide_src = hair_for_t
-                    if (
-                        hide_src in profile.exclusive_part_ids
-                        and hide_src != target.hair_id
+                    if profile.key == "claire" and any(
+                        t.key in ("military", "tanktop") for t in unique_targets
                     ):
-                        hide_src = ""
-                    notify(
-                        f"Hiding exclusive hat/headband for {target.name}...")
-                    ensure_exclusive_part_mesh_hide(
-                        staging, target, hide_src, report,
-                        allow_template=not analysis.modinfo.addonfor,
+                        notify("Applying Military / Tank Top face textures...")
+                        _apply_face_look(
+                            staging, unique_targets, analysis, report)
+
+                    notify("Isolating shared outfit textures...")
+                    isolate_shared_outfit_textures(
+                        staging, face_priv, rename_map, report)
+
+                    notify("Syncing costume-select name / clearing leftovers...")
+                    try:
+                        _absorb_msg_lines(
+                            report,
+                            sync_costume_names_for_targets(
+                                staging,
+                                unique_targets,
+                                display_name=display_name,
+                                name_target=msg_target,
+                                display_names=display_names or None,
+                                source_msg_stem_by_target=_source_msg_stems(converts),
+                            ),
+                        )
+                    except Exception as e:
+                        raise ConversionError(
+                            f"Failed to sync in-game outfit name: {e}") from e
+                else:
+                    # Delete-only: isolate face/hair against a remaining slot if any.
+                    deleted_keys = {op.source.key for op in deletes}
+                    remaining = [
+                        o for o in _analysis_outfits(analysis)
+                        if is_convertible_outfit(o) and o.key not in deleted_keys
+                    ]
+                    seed = remaining[0] if remaining else deletes[0].source
+                    notify("Isolating face/hair...")
+                    face_priv, hair_priv = isolate_claire_face_hair(
+                        staging, analysis, seed, seed, rename_map, report,
+                        keep_exclusive_ids=set(),
                     )
+                    redirect_targets = remaining or [seed]
+                    notify("Ensuring private hair prefab...")
+                    for outfit in redirect_targets:
+                        hair_for_t = resolve_hair_id_for_target(
+                            staging, outfit, hair_priv)
+                        if hair_for_t:
+                            ensure_isolated_hair_redirect(
+                                staging, analysis, outfit, hair_for_t,
+                                rename_map, report)
+                    drop_mesh_only_hair_pfbs(
+                        staging, report,
+                        is_addon=bool(analysis.modinfo.addonfor),
+                        profile=profile,
+                    )
+                    notify("Isolating shared outfit textures...")
+                    isolate_shared_outfit_textures(
+                        staging, face_priv, rename_map, report)
 
-                # Overlay AddonFor hair PFBs must not stomp Main's redirect
-                # (No Hat mesh-only; Apocalypse-style mesh+mdf without .chain).
-                drop_mesh_only_hair_pfbs(
-                    staging, report,
-                    is_addon=bool(analysis.modinfo.addonfor),
-                    profile=profile,
-                )
-
-                if profile.key == "claire" and any(
-                    t.key in ("military", "tanktop") for t in unique_targets
-                ):
-                    notify("Applying Military / Tank Top face textures...")
-                    _apply_face_look(
-                        staging, unique_targets, analysis, report)
-
-                notify("Isolating shared outfit textures...")
-                isolate_shared_outfit_textures(
-                    staging, face_priv, rename_map, report)
-
-                notify("Syncing costume-select name / clearing leftovers...")
-                try:
-                    _absorb_msg_lines(
+                # Retarget author figure galleries onto the convert target (or base
+                # figure/pl paths) so Bonuses keeps custom face/hair after isolation.
+                # Delete-only still strips extras.
+                if converts:
+                    notify("Retargeting figure gallery...")
+                    convert_figure_scenes_for_ops(
+                        staging,
+                        [(op.source, op.target) for op in converts
+                         if op.target is not None],
+                        rename_map,
                         report,
-                        sync_costume_names_for_targets(
-                            staging,
-                            unique_targets,
-                            display_name=display_name,
-                            name_target=msg_target,
-                            display_names=display_names or None,
-                            source_msg_stem_by_target=_source_msg_stems(converts),
-                        ),
                     )
-                except Exception as e:
-                    raise ConversionError(
-                        f"Failed to sync in-game outfit name: {e}") from e
-            else:
-                # Delete-only: isolate face/hair against a remaining slot if any.
-                deleted_keys = {op.source.key for op in deletes}
-                remaining = [
-                    o for o in _analysis_outfits(analysis)
-                    if is_convertible_outfit(o) and o.key not in deleted_keys
-                ]
-                seed = remaining[0] if remaining else deletes[0].source
-                notify("Isolating face/hair...")
-                face_priv, hair_priv = isolate_claire_face_hair(
-                    staging, analysis, seed, seed, rename_map, report,
-                    keep_exclusive_ids=set(),
+                else:
+                    notify("Isolating figure gallery (strip author scenes)...")
+                    strip_claire_extra_figures(
+                        staging, report, figure_prefix=profile.figure_prefix,
+                        extra_ids=profile.extra_figure_ids,
+                    )
+
+                notify("Removing DLC contentsholder...")
+                sync_dlc_contentsholder(staging, package_target, report)
+
+                if rename_map:
+                    notify("Patching path strings inside binary files...")
+                    patch_binaries(staging, rename_map, report)
+                    patch_mdf_material_hashes(staging, rename_map, report)
+
+
+            if outfit_on_stm and profile.key == "claire":
+                from .hair_prefabs import publish_rt_hair_hide
+                from .platform.body_prefab import (
+                    publish_rt_body_prefabs,
+                    publish_rt_slot_body_prefab,
                 )
-                redirect_targets = remaining or [seed]
-                notify("Ensuring private hair prefab...")
-                for outfit in redirect_targets:
-                    hair_for_t = resolve_hair_id_for_target(
-                        staging, outfit, hair_priv)
-                    if hair_for_t:
-                        ensure_isolated_hair_redirect(
-                            staging, analysis, outfit, hair_for_t,
-                            rename_map, report)
-                drop_mesh_only_hair_pfbs(
+                from .platform.costume_slots import mount_claire_costume_parts
+
+                notify("Publishing ray-tracing costume files...")
+                mount_claire_costume_parts(
                     staging, report,
-                    is_addon=bool(analysis.modinfo.addonfor),
-                    profile=profile,
+                    face_slot=_claire_destination_face_slot(converts),
                 )
-                notify("Isolating shared outfit textures...")
-                isolate_shared_outfit_textures(
-                    staging, face_priv, rename_map, report)
-
-            # Retarget author figure galleries onto the convert target (or base
-            # figure/pl paths) so Bonuses keeps custom face/hair after isolation.
-            # Delete-only still strips extras.
-            if converts:
-                notify("Retargeting figure gallery...")
-                convert_figure_scenes_for_ops(
-                    staging,
-                    [(op.source, op.target) for op in converts
-                     if op.target is not None],
-                    rename_map,
-                    report,
-                )
-            else:
-                notify("Isolating figure gallery (strip author scenes)...")
-                strip_claire_extra_figures(
-                    staging, report, figure_prefix=profile.figure_prefix,
-                    extra_ids=profile.extra_figure_ids,
-                )
-
-            notify("Removing DLC contentsholder...")
-            sync_dlc_contentsholder(staging, package_target, report)
-
-            if rename_map:
-                notify("Patching path strings inside binary files...")
-                patch_binaries(staging, rename_map, report)
-                patch_mdf_material_hashes(staging, rename_map, report)
-
+                publish_rt_body_prefabs(staging, report)
+                for op in converts:
+                    if op.target is None:
+                        continue
+                    for slot in op.target.all_slots:
+                        publish_rt_slot_body_prefab(
+                            staging, report, op.source, op.target.body_id, slot,
+                        )
+                        publish_rt_hair_hide(staging, report, op.target, slot)
         face_targets = [
             op.target for op in converts
             if op.target is not None
@@ -811,6 +840,14 @@ def convert_with_ops(
             except OSError as exc:
                 report.warnings.append(
                     f"Failed to update modinfo.ini: {exc}")
+
+        from .platform.path_remap import lowercase_stm_tree
+
+        lowered = lowercase_stm_tree(staging)
+        if lowered:
+            report.rename_ops.append(
+                f"lowercased {lowered} ray-tracing paths under natives/stm"
+            )
 
         if write_log:
             log_marker = marker or ""

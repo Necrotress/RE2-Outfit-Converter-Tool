@@ -16,7 +16,13 @@ from pathlib import Path
 from .character import CLAIRE_PROFILE, CharacterProfile
 from .isolation import staging_mesh_ids
 from .outfits import Outfit
-from .paths import assets_dir, ensure_dir_ci, mesh_roots, resolve_ci
+from .paths import (
+    assets_dir,
+    ensure_dir_ci,
+    mesh_roots,
+    natives_platform,
+    resolve_ci,
+)
 from .reports import ConversionReport
 
 _TEMPLATE_DIR = "exclusive_hide/pl1070_hair"
@@ -156,9 +162,11 @@ def _pick_source_hair_dir(
             if _is_face_kit(folder, src_id, profile):
                 continue
             return folder, src_id, note
-    # Bundled hide kit is Claire shared hair only. Leon has no equivalent
-    # template; without a mod hair mesh the preview warning is enough.
-    if allow_template and profile.key == "claire":
+    # Bundled hide kit is Claire shared hair only, and it is a classic mesh.
+    # On a ray-tracing tree that file would become the hair Noir's pak
+    # prefab loads. Leave the game hair and chain alone instead.
+    # Leon has no equivalent template.
+    if allow_template and profile.key == "claire" and natives_platform() != "stm":
         template = _bundled_hair_template()
         if template is not None:
             return template, shared, "from bundled Claire hair template"
@@ -195,6 +203,12 @@ def ensure_exclusive_part_mesh_hide(
             report.rename_ops.append(
                 f"exclusive preview hide: left {exclusive_id} alone "
                 "(addon has no hair of its own)"
+            )
+            return
+        if natives_platform() == "stm":
+            report.rename_ops.append(
+                f"exclusive preview hide: left {exclusive_id} alone "
+                "(ray tracing keeps the game hair)"
             )
             return
         report.warnings.append(

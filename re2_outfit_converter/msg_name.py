@@ -18,6 +18,26 @@ ENGLISH_LANG = 1  # REMSGUtil.SHORT_LANG_LU["en"]
 MSG_DIR_DLC = "natives/x64/sectionroot/message/mes_other_dlc"
 MSG_DIR_SYS = "natives/x64/sectionroot/message/mes_sys"
 MSG_DIR_SYS_RT = "natives/stm/sectionroot/message/mes_sys"
+_RT_MSG_SUFFIX = "50397457"
+
+
+def _written_msg_path(staging: Path, classic_dir: str, filename: str) -> Path:
+    """Path for a name file on the active platform, including the RT suffix."""
+    from .paths import locate, natives_platform
+
+    name = filename
+    if natives_platform() == "stm" and name.lower().endswith(".msg.14"):
+        name = name[:-len("14")] + _RT_MSG_SUFFIX
+    dest = staging / locate(classic_dir) / name
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    return dest
+
+
+def _finish_written_msg(path: Path) -> None:
+    from .paths import natives_platform
+
+    if natives_platform() == "stm":
+        _stamp_written_msg(path)
 
 # Vanilla identity for Name / Figure rows. The game looks these up by entry
 # name + GUID, not by the filename alone.
@@ -677,9 +697,10 @@ def _write_costume_sys_name(staging: Path, msg_stem: str, display_name: str) -> 
     if name_entry is None:
         raise ValueError(f"Costume MSG missing entry {n_name!r}")
     _set_all_langs(name_entry, text)
-    costume_dest = staging / MSG_DIR_SYS / "mes_sys_costume.msg.14"
-    costume_dest.parent.mkdir(parents=True, exist_ok=True)
+    costume_dest = _written_msg_path(
+        staging, MSG_DIR_SYS, "mes_sys_costume.msg.14")
     REMSGUtil.exportMSG(costume, str(costume_dest))
+    _finish_written_msg(costume_dest)
     ops.append(
         f"set in-game outfit name -> {costume_dest.name!r} "
         f"[{n_name}]: {text!r}"
@@ -691,8 +712,10 @@ def _write_costume_sys_name(staging: Path, msg_stem: str, display_name: str) -> 
         raise ValueError(f"Reward MSG missing entry {f_name!r}")
     figure_text = f"Claire ({text})"
     _set_all_langs(figure_entry, figure_text)
-    reward_dest = staging / MSG_DIR_SYS / "mes_sys_reward.msg.14"
+    reward_dest = _written_msg_path(
+        staging, MSG_DIR_SYS, "mes_sys_reward.msg.14")
     REMSGUtil.exportMSG(reward, str(reward_dest))
+    _finish_written_msg(reward_dest)
     ops.append(
         f"set in-game figure name -> {reward_dest.name!r} "
         f"[{f_name}]: {figure_text!r}"
@@ -765,8 +788,9 @@ def apply_outfit_display_name(
             f"Missing bundled costume name template: {template}")
 
     dest_name = _cos_dest_name(stem)
-    dest = staging / MSG_DIR_DLC / dest_name
+    dest = _written_msg_path(staging, MSG_DIR_DLC, dest_name)
     write_outfit_name(template, dest, display_name, stem)
+    _finish_written_msg(dest)
     ops = [f"set in-game outfit name -> {dest_name!r}: {display_name!r}"]
     if cleanup:
         ops.extend(_remove_clairecos_msgs(staging, keep=dest))
@@ -975,7 +999,8 @@ def sync_costume_names_for_targets(
             apply_outfit_display_name(
                 staging, stem, use_name, cleanup=False)
         )
-        keep_cos.append(staging / MSG_DIR_DLC / _cos_dest_name(stem))
+        keep_cos.append(
+            _written_msg_path(staging, MSG_DIR_DLC, _cos_dest_name(stem)))
 
     ops.extend(_remove_clairecos_msgs(staging, keep=keep_cos))
     ops.extend(_remove_costume_sys_msgs(staging))

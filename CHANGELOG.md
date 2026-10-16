@@ -5,6 +5,21 @@ All notable changes to **RE2 Remake Outfit Converter** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [1.3.2] — 2026-10-16
+
+Ray-tracing converts keep the outfit that was already drawing, and attach a private cloth chain without the classic joint file.
+
+### Fixed
+
+- `natives/stm` paths are lowercased before the zip, so Fluffy’s pak hash matches the loose file.
+- A texture filename takes the destination body id along with its folder.
+- A classic body with its own chain gets a ray-tracing body prefab on every Claire slot. Military and Elza borrow a chain-bearing template. Material names are copied only when the suffix and the length match.
+- A later slot publish does not replace a prefab that already names a private chain in the mod.
+- The Noir and Military hair hide leaves a prefab that already loads a mesh or material the mod shipped.
+- A material rename of more than one hop updates the Murmur hash to the final name.
+- Index-rename does not run when a name repeats or two shared names trade slots. The same names in a different order move with their textures, so the hair shader stays off the face. A leftover that only shifted one shared name can still take the mesh slot.
+- The ray-tracing body prefab keeps the game’s joint file (version 19). A classic joint file (version 11) on that prefab freezes the outfit change.
+
 ## [1.3.1] — 2026-10-14
 
 The main window is restyled. Convert behavior is unchanged from 1.3.0.
@@ -245,6 +260,7 @@ landed after that release (formerly tracked as 1.1.5 / 1.1.6 / unreleased).
 - Face/hair isolation onto private mesh IDs; AddonFor batch packaging.
 - Same-length binary path patching; Fluffy-ready zip/folder output.
 
+[1.3.2]: https://github.com/Necrotress/RE2-Outfit-Converter-Tool/releases/tag/v1.3.2
 [1.3.1]: https://github.com/Necrotress/RE2-Outfit-Converter-Tool/releases/tag/v1.3.1
 [1.3.0]: https://github.com/Necrotress/RE2-Outfit-Converter-Tool/releases/tag/v1.3.0
 [1.2.0]: https://github.com/Necrotress/RE2-Outfit-Converter-Tool/releases/tag/v1.2.0

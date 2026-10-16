@@ -336,6 +336,19 @@ def test_exclusive_mesh_hide_does_not_copy_a_face_onto_the_hair_slot(tmp_path: P
     assert not any("pl1813" in op for op in report.rename_ops)
 
 
+def test_ray_tracing_hide_leaves_the_pak_hair_alone(tmp_path: Path):
+    from re2_outfit_converter.paths import use_natives_platform
+
+    staging = tmp_path
+    report = ConversionReport()
+    with use_natives_platform("stm"):
+        ensure_exclusive_part_mesh_hide(
+            staging, CLAIRE_OUTFIT_BY_KEY["noir"], "", report)
+    assert not list(staging.rglob("pl1075.mesh*"))
+    assert any("ray tracing keeps the game hair" in op for op in report.rename_ops)
+    assert not any("bundled Claire hair template" in op for op in report.rename_ops)
+
+
 def test_exclusive_mesh_hide_seeds_military_from_template(tmp_path: Path):
     staging = tmp_path
     (staging / PARTS_DIR).mkdir(parents=True)

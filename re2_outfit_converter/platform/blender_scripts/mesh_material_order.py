@@ -21,8 +21,14 @@ def material_names(re_mesh) -> list[str]:
     return [re_mesh.rawNameList[i] for i in re_mesh.materialNameRemapList]
 
 
+def _names_repeat(names: list[str]) -> bool:
+    return len(names) != len(set(names))
+
+
 def slot_remap(src_names: list[str], dest_names: list[str]) -> list[int] | None:
     """dest slot → src slot, or None if the name sets differ."""
+    if _names_repeat(src_names) or _names_repeat(dest_names):
+        return None
     if src_names == dest_names:
         return list(range(len(src_names)))
     if len(src_names) != len(dest_names) or set(src_names) != set(dest_names):
@@ -186,27 +192,43 @@ def _drop_materials_the_mesh_does_not_name(mdf, mesh_names: list[str]) -> list[s
 
 
 def _index_pairing_is_trustworthy(mdf_names: list[str], mesh_names: list[str]) -> bool:
-    """True when shared names already sit on the same slot.
+    """True when renaming by index keeps each shared name's textures.
 
     A leftover name (Holster where the mesh says Body2) is safe to rename:
-    the textures at that index belong to the mesh slot. Moto's cloth list
-    is the other case. ``pl2020_Cardigan_Mat`` is the leather, and the mesh
-    slot of that name is a different index. Renaming by index puts the
-    leather on the skin and the glass shader on the jacket.
+    the textures at that index belong to the mesh slot. A shared name may
+    also sit one slot off when a leftover is what displaced it. Latex's
+    ``clear_Mat`` is on the accessories index and ``Panel`` is on the clear
+    index; the dress textures are the Holster leftover on Body2.
+
+    A swap of two shared names is the other case. Elite's face list is
+    Eyelash then Face; the mesh lists Face then Eyelash. Renaming by index
+    puts the hair shader on the face, which drops the neck and the head.
     """
+    if _names_repeat(mdf_names) or _names_repeat(mesh_names):
+        return False
     mdf_at = {name: i for i, name in enumerate(mdf_names)}
     mesh_at = {name: i for i, name in enumerate(mesh_names)}
-    shared = set(mdf_at) & set(mesh_at)
+    mdf_set = set(mdf_at)
+    mesh_set = set(mesh_at)
+    shared = mdf_set & mesh_set
     if not shared:
         return True
-    # Same names, different order. RTX looks the material up by name, so
-    # renaming by index swaps the shaders. Elite's face list is Eyelash
-    # then Face; the mesh lists Face then Eyelash. That put the hair
-    # shader on the face, which drops the neck and, on Tank Top, the head.
-    if set(mdf_names) == set(mesh_names):
-        return all(mdf_at[name] == mesh_at[name] for name in shared)
-    mismatches = sum(1 for name in shared if mdf_at[name] != mesh_at[name])
-    return mismatches * 2 < len(shared)
+    displaced = 0
+    for name in shared:
+        mdf_i = mdf_at[name]
+        mesh_i = mesh_at[name]
+        if mdf_i == mesh_i:
+            continue
+        if mesh_i >= len(mdf_names) or mdf_i >= len(mesh_names):
+            return False
+        # The other slot is also a shared name. That is a swap.
+        if mdf_names[mesh_i] in mesh_set or mesh_names[mdf_i] in mdf_set:
+            return False
+        displaced += 1
+    # One Skirt name on the wrong slot must not rename the whole list.
+    # A leftover that pushed clear_Mat over by one slot may: the other
+    # shared names already agree.
+    return displaced * 2 < len(shared)
 
 
 def used_material_names(re_mesh) -> set[str]:
@@ -470,6 +492,26 @@ def _collapse_duplicate_material_names(
     return notes
 
 
+def _reorder_same_names(mdf, mesh_names: list[str]) -> list[str] | None:
+    """Move each material onto the mesh slot of its own name.
+
+    The face file lists Eyelash, then Face. The mesh lists Face, then
+    Eyelash. The hair shader has to stay named Eyelash and sit on the
+    eyelash slot. Renaming the eyelash slot to Face drops the head.
+    """
+    mats = list(getattr(mdf, "materialList", []) or [])
+    names = [mat.materialName for mat in mats]
+    order = slot_remap(names, mesh_names)
+    if order is None or order == list(range(len(order))):
+        return None
+    mdf.materialList = [mats[index] for index in order]
+    return [
+        f"{names[index]} moved to mesh slot {slot}"
+        for slot, index in enumerate(order)
+        if slot != index
+    ]
+
+
 def align_mdf_names_to_mesh(
     mdf,
     mesh_names: list[str],
@@ -495,12 +537,14 @@ def align_mdf_names_to_mesh(
     # placeholder and rename the real albedo away. Collapse by file size
     # instead.
     duplicated = len(mdf_names) != len(set(mdf_names))
-    # Index rename only when the lists are the same length and the shared
-    # names already agree. A shuffled list is not safe to rename by index:
-    # the battlesuit body is the slot named Tanktop, and that material
-    # already has the suit textures. Renaming by index put the jacket
-    # pants on it. A longer file still has to rename a donor onto a hole
+    # The same names in a different order stay with their textures and move
+    # to the mesh slot. Renaming that list by index put the hair shader on
+    # the face. A longer file still has to rename a donor onto a hole
     # first: dropping first can delete the jacket material.
+    if not duplicated and len(mats) == len(mesh_names):
+        reordered = _reorder_same_names(mdf, list(mesh_names))
+        if reordered is not None:
+            return reordered
     if (
         not duplicated
         and len(mats) == len(mesh_names)

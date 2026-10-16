@@ -30,6 +30,24 @@ _EXPORTED = [
 ]
 
 
+def test_index_rename_skips_a_repeated_or_swapped_name():
+    """A repeated name, or one shared name on the wrong slot, is not index-renamed."""
+    claire_mdf = ["pl1000_Body_Mat", "pl1000_Chain_Mat", "pl1000_Body_Mat"]
+    claire_mesh = ["pl1000_Body_Mat", "pl1000_Holster_Mat", "pl1000_Chain_Mat"]
+    assert mesh_material_order._index_pairing_is_trustworthy(
+        claire_mdf, claire_mesh,
+    ) is False
+    leon_mdf = ["pl0000_Body_Mat", "pl0000_Chain_Mat", "pl0000_Holster_Mat"]
+    leon_mesh = ["pl0000_Chain_Mat", "pl0000_Body_Mat", "pl0000_Holster_Mat"]
+    assert mesh_material_order._index_pairing_is_trustworthy(
+        leon_mdf, leon_mesh,
+    ) is False
+    assert mesh_material_order.slot_remap(
+        ["pl0000_Body_Mat", "pl0000_Body_Mat"],
+        ["pl0000_Body_Mat", "pl0000_Chain_Mat"],
+    ) is None
+
+
 def test_latex_demon_body2_returns_to_the_dress_slot():
     """Body2 is the clothing. Export parked it on MDF index 2 (Env_Emissive)."""
     remap = mesh_material_order.slot_remap(_SRC, _EXPORTED)
@@ -94,13 +112,15 @@ def test_face_and_eyelash_are_not_swapped_to_match_mesh_order():
     ]
     notes = mesh_material_order.align_mdf_names_to_mesh(mdf, mesh)
     by_name = {mat.materialName: mat for mat in mdf.materialList}
+    assert mdf.materialList[0].materialName == "pl1050_Face_Mat"
+    assert mdf.materialList[0].textureList[0].texturePath == "face_ALBM.tex"
     assert by_name["pl1050_Face_Mat"].textureList[0].texturePath == "face_ALBM.tex"
     assert by_name["pl1050_Eyelash_Mat"].textureList[0].texturePath == "hair_ALBA.tex"
     assert not any("match mesh slot" in note for note in notes)
 
 
 def test_latex_demon_mdf_names_follow_the_mesh():
-    """Holster/Panel leftovers must take the clothing mesh names."""
+    """Holster is the dress. clear_Mat was pushed onto the accessories index by a leftover."""
     mdf = _Mdf([
         "pl5300_Body_Mat",
         "pl5300_Skin_Mat",

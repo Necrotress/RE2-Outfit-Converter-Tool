@@ -35,7 +35,7 @@ from .path_remap import (
 from .chain_convert import convert_chain_to_rt
 from .pfb_convert import convert_chain, convert_pfb
 from .reports import ConversionError, ConversionReport, FormatConversionError
-from .body_prefab import publish_rt_body_prefabs
+from .body_prefab import publish_classic_body_prefabs, publish_rt_body_prefabs
 from .costume_slots import mount_claire_costume_parts
 from .tex_convert import convert_tex_file, convert_tex_to_rt
 
@@ -246,6 +246,7 @@ def _apply_platform(
         move_tree_to_classic(staging, report)
         notify("Patching embedded paths…")
         patch_binaries(staging, stm_to_x64_rename_map(), report)
+        publish_classic_body_prefabs(staging, report)
 
     if report.failed_ops:
         if blender is not None:

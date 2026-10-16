@@ -61,6 +61,57 @@ def test_patchable_allowlist():
     assert not patchable("readme.txt")
 
 
+def test_body_rename_updates_the_texture_filename_for_every_slot(tmp_path: Path):
+    from re2_outfit_converter.isolation import _retarget_unshipped_folder_paths
+
+    # Every convertible Claire and Leon body id, each aimed at another slot.
+    pairs = (
+        ("pl1000", "pl1001"),
+        ("pl1001", "pl1006"),
+        ("pl1002", "pl1004"),
+        ("pl1003", "pl1005"),
+        ("pl1005", "pl1000"),
+        ("pl1006", "pl1002"),
+        ("pl1004", "pl1003"),
+        ("pl0002", "pl0004"),
+        ("pl0000", "pl0005"),
+        ("pl0001", "pl0003"),
+        ("pl0003", "pl0006"),
+        ("pl0006", "pl0002"),
+        ("pl0004", "pl0001"),
+        ("pl0005", "pl0000"),
+    )
+    for old, new in pairs:
+        staging = tmp_path / old
+        mdf = staging / "body.mdf2.21"
+        mdf.parent.mkdir()
+        top = f"SectionRoot/Character/Player/pl1000/{old}/{old}_Top_ALBM.tex"
+        nested = (
+            f"SectionRoot/Character/Player/pl1000/{old}/{old}_01/{old}_01.mdf2"
+        )
+        chain = (
+            f"SectionRoot/Character/Player/pl1000/{old}/{old}_chain_albm.tex"
+        )
+        mdf.write_bytes(
+            top.encode("utf-16le") + b"\x00\x00"
+            + nested.encode("utf-16le") + b"\x00\x00"
+            + chain.encode("utf-16le")
+        )
+        rename_map: dict[str, str] = {}
+        old_dir = f"SectionRoot/Character/Player/pl1000/{old}"
+        new_dir = f"SectionRoot/Character/Player/pl1000/{new}"
+        _retarget_unshipped_folder_paths(
+            staging, old_dir, new_dir, old, rename_map,
+        )
+        assert rename_map[top] == (
+            f"SectionRoot/Character/Player/pl1000/{new}/{new}_Top_ALBM.tex"
+        )
+        assert rename_map[nested] == (
+            f"SectionRoot/Character/Player/pl1000/{new}/{old}_01/{new}_01.mdf2"
+        )
+        assert chain not in rename_map
+
+
 def test_patch_binaries_skips_oversized(tmp_path: Path, monkeypatch):
     import re2_outfit_converter.path_patch as pp
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 import sys
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
 from .character import CLAIRE_PROFILE, CharacterProfile
@@ -12,14 +14,42 @@ from .character import CLAIRE_PROFILE, CharacterProfile
 PARTS_DIR = CLAIRE_PROFILE.parts_dir
 MESH_ROOTS = CLAIRE_PROFILE.mesh_roots
 PFB_EXT_RE = re.compile(r"(\.pfb(?:\.\d+)?)$", re.IGNORECASE)
+_X64 = "natives/x64/"
+# A stay-on-ray-tracing convert reads and writes stm. Classic stays x64.
+_NATIVES_PLATFORM: ContextVar[str] = ContextVar(
+    "re2oc_natives_platform", default="x64",
+)
+
+
+def natives_platform() -> str:
+    return _NATIVES_PLATFORM.get()
+
+
+@contextmanager
+def use_natives_platform(platform: str):
+    """Point outfit-stage path lookups at ``natives/x64`` or ``natives/stm``."""
+    token = _NATIVES_PLATFORM.set(platform)
+    try:
+        yield
+    finally:
+        _NATIVES_PLATFORM.reset(token)
+
+
+def locate(rel: str) -> str:
+    """Rewrite a classic ``natives/x64`` relative path for the active platform."""
+    platform = _NATIVES_PLATFORM.get()
+    text = rel.replace("\\", "/")
+    if platform == "x64" or not text.lower().startswith(_X64):
+        return text
+    return f"natives/{platform}/" + text[len(_X64):]
 
 
 def parts_dir(profile: CharacterProfile | None = None) -> str:
-    return (profile or CLAIRE_PROFILE).parts_dir
+    return locate((profile or CLAIRE_PROFILE).parts_dir)
 
 
 def mesh_roots(profile: CharacterProfile | None = None) -> tuple[str, ...]:
-    return (profile or CLAIRE_PROFILE).mesh_roots
+    return tuple(locate(root) for root in (profile or CLAIRE_PROFILE).mesh_roots)
 
 
 def assets_dir() -> Path:
@@ -31,6 +61,7 @@ def assets_dir() -> Path:
 
 def resolve_ci(base: Path, rel: str) -> Path | None:
     """Walk ``rel`` under ``base`` case-insensitively; return None if missing."""
+    rel = locate(rel)
     current = base
     for seg in rel.split("/"):
         if not current.is_dir():
@@ -47,6 +78,7 @@ def resolve_ci(base: Path, rel: str) -> Path | None:
 
 def ensure_dir_ci(base: Path, rel: str) -> Path:
     """Return ``base/rel``, creating parents; reuse existing case-insensitive path."""
+    rel = locate(rel)
     existing = resolve_ci(base, rel)
     if existing is not None:
         return existing
@@ -58,9 +90,14 @@ def ensure_dir_ci(base: Path, rel: str) -> Path:
 def engine_path(rel: str) -> str | None:
     """natives/x64/.../file.mesh.1808312334 -> sectionroot/.../file.mesh"""
     low = rel.replace("\\", "/")
-    if not low.lower().startswith("natives/x64/"):
+    lower = low.lower()
+    prefix = next(
+        (item for item in ("natives/x64/", "natives/stm/") if lower.startswith(item)),
+        None,
+    )
+    if prefix is None:
         return None
-    path = low[len("natives/x64/"):]
+    path = low[len(prefix):]
     dirname, _, fname = path.rpartition("/")
     segs = fname.split(".")
     if len(segs) >= 3 and segs[-1].isdigit():

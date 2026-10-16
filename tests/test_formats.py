@@ -62,6 +62,34 @@ def test_platform_from_rel():
     assert platform_from_rel("modinfo.ini") is None
 
 
+def test_lowercase_stm_tree_matches_the_game_path(tmp_path: Path):
+    from re2_outfit_converter.platform.path_remap import lowercase_stm_tree
+
+    body = (
+        tmp_path / "natives" / "STM" / "Sectionroot" / "Character"
+        / "Player" / "Pl1000"
+    )
+    body.mkdir(parents=True)
+    (body / "pl1005_Top_ALBM.tex.34").write_bytes(b"tex")
+    prefab = tmp_path / "natives" / "STM" / "objectroot" / "prefab"
+    prefab.mkdir(parents=True)
+    (prefab / "pl1000_body_costume_a.pfb.17").write_bytes(b"pfb")
+
+    assert lowercase_stm_tree(tmp_path) > 0
+
+    platform = next(path.name for path in (tmp_path / "natives").iterdir())
+    assert platform == "stm"
+    section = tmp_path / "natives" / "stm" / "sectionroot"
+    stored = [path.name for path in section.rglob("*") if path.is_file()]
+    assert stored == ["pl1005_top_albm.tex.34"]
+    written = (
+        tmp_path / "natives" / "stm" / "objectroot" / "prefab"
+        / "pl1000_body_costume_a.pfb.17"
+    )
+    assert written.read_bytes() == b"pfb"
+    assert lowercase_stm_tree(tmp_path) == 0
+
+
 def test_move_tree_rewrites_msg_for_current_rt(tmp_path: Path):
     from re2_outfit_converter.msg_name import apply_outfit_display_name, import_msg
     from re2_outfit_converter.platform.formats import MSG_VERSION_RT

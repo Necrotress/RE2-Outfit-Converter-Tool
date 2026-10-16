@@ -7,7 +7,7 @@ lerp 0.1, and collision flags -1. Renaming the file is not enough — the
 ray-tracing build reads chain.46 only, and a chain whose offsets are wrong
 freezes outfit changes.
 
-Downgrade (chain.46 → chain.21) is still unsupported.
+Downgrade removes those same inserted fields and writes chain.21.
 """
 
 from __future__ import annotations
@@ -446,6 +446,283 @@ def _slice(data: bytes, offset: int, size: int, what: str) -> bytes:
 
 def _u64(data: bytes, offset: int) -> int:
     return struct.unpack_from("<Q", data, offset)[0]
+
+
+def convert_chain_from_rt(data: bytes) -> bytes:
+    """Return chain.21 bytes for a chain.46 file this converter can read."""
+    return _write_classic(_parse_rt(data))
+
+
+def _parse_rt(data: bytes) -> _Chain:
+    if len(data) < HEADER_SIZE or data[4:8] != CHAIN_MAGIC:
+        raise FormatConversionError("Not a chain file.")
+    version = struct.unpack_from("<I", data, 0)[0]
+    if version != VERSION_RT:
+        raise FormatConversionError(
+            f"chain version {version} is not ray-tracing chain.46."
+        )
+    if _u64(data, 0x10) or _u64(data, 0x20):
+        raise FormatConversionError(
+            "This chain has an extra string table the converter does not read."
+        )
+
+    group_count = data[0x48]
+    setting_count = data[0x49]
+    collision_count = data[0x4A]
+    wind_count = data[0x4B]
+    link_count = data[0x4C]
+    collision_at = _u64(data, 0x18)
+    group_at = _u64(data, 0x28)
+    link_at = _u64(data, 0x30)
+    setting_at = _u64(data, 0x38)
+    wind_at = _u64(data, 0x40)
+
+    chain = _Chain()
+    for index in range(setting_count):
+        raw = _slice(data, setting_at + index * _SETTING_V46, _SETTING_V46, "setting")
+        path_offset = struct.unpack_from("<Q", raw, 0)[0]
+        path = _wstring(data, path_offset) if path_offset else None
+        chain.settings.append(_Setting(_shrink_setting(raw), path, path_offset))
+
+    for index in range(collision_count):
+        raw = _slice(
+            data, collision_at + index * _COLLISION_V46, _COLLISION_V46, "collision",
+        )
+        sub_at = struct.unpack_from("<Q", raw, 0)[0]
+        sub_count = raw[74]
+        subs: list[bytes] = []
+        if sub_count:
+            if not sub_at:
+                raise FormatConversionError(
+                    "A chain collision names sub-shapes it does not store."
+                )
+            for sub_index in range(sub_count):
+                subs.append(_shrink_sub(_slice(
+                    data, sub_at + sub_index * _SUB_V46, _SUB_V46, "subcollision",
+                )))
+        chain.collisions.append(_Collision(_shrink_collision(raw), subs))
+
+    for index in range(group_count):
+        raw = _slice(data, group_at + index * _GROUP_V46, _GROUP_V46, "chain group")
+        name_at = struct.unpack_from("<Q", raw, 0)[0]
+        node_at = struct.unpack_from("<Q", raw, 8)[0]
+        node_count = raw[20]
+        name = _wstring(data, name_at) if name_at else b"\x00\x00"
+        nodes: list[bytes] = []
+        if node_count:
+            if not node_at:
+                raise FormatConversionError(
+                    "A chain group names nodes it does not store."
+                )
+            for node_index in range(node_count):
+                nodes.append(_shrink_node(_slice(
+                    data, node_at + node_index * _NODE_V46, _NODE_V46, "chain node",
+                )))
+        if node_count:
+            node_end = node_at + node_count * _NODE_V46
+        else:
+            node_end = (name_at + len(name) + 15) & ~15
+        chain.groups.append(_Group(
+            _shrink_group(raw), name, nodes, name_at, node_end, index,
+        ))
+
+    _pieces_from_rt(data, chain, group_at, group_count, wind_count, wind_at, link_count, link_at)
+
+    if wind_count:
+        if not wind_at:
+            raise FormatConversionError("Chain wind settings are missing.")
+        chain.wind = _slice(data, wind_at, wind_count * _WIND_SIZE, "wind")
+    if link_count:
+        if not link_at:
+            raise FormatConversionError("Chain links are missing.")
+        chain.classic_link_at = link_at
+        chain.links = _slice(data, link_at, link_count * _LINK_SIZE, "link")
+        tail_at = link_at + link_count * _LINK_SIZE
+        if tail_at < len(data):
+            chain.link_tail = data[tail_at:]
+    return chain
+
+
+def _pieces_from_rt(
+    data: bytes,
+    chain: _Chain,
+    group_at: int,
+    group_count: int,
+    wind_count: int,
+    wind_at: int,
+    link_count: int,
+    link_at: int,
+) -> None:
+    if not chain.groups:
+        return
+    limit = len(data)
+    if wind_count and wind_at:
+        limit = min(limit, wind_at)
+    if link_count and link_at:
+        limit = min(limit, link_at)
+    cursor = (group_at + group_count * _GROUP_V46 + 15) & ~15
+    for group in sorted(chain.groups, key=lambda item: item.name_at):
+        if cursor < group.name_at:
+            _append_rt_subchains(data, chain, cursor, group.name_at)
+        group.piece = len(chain.pieces)
+        chain.pieces.append(_Piece(group.name, group.nodes))
+        cursor = max(cursor, group.node_end)
+    if cursor < limit:
+        _append_rt_subchains(data, chain, cursor, limit)
+
+
+def _append_rt_subchains(data: bytes, chain: _Chain, start: int, limit: int) -> None:
+    pos = start
+    while pos < limit:
+        if not _name_at(data, pos):
+            if data[pos:limit].strip(b"\x00") == b"":
+                return
+            raise FormatConversionError(
+                "Chain data between groups is not a subchain."
+            )
+        name = _wstring(data, pos)
+        pos = (pos + len(name) + 15) & ~15
+        nodes: list[bytes] = []
+        while pos + _NODE_V46 <= limit and not _name_at(data, pos):
+            nodes.append(_shrink_node(data[pos:pos + _NODE_V46]))
+            pos += _NODE_V46
+        chain.pieces.append(_Piece(name, nodes))
+    if pos != limit and data[pos:limit].strip(b"\x00") != b"":
+        raise FormatConversionError("Chain subchain did not end on the next group.")
+
+
+def _name_at(data: bytes, pos: int) -> bool:
+    if pos % 2 or pos + 3 >= len(data):
+        return False
+    return 32 <= data[pos] < 127 and data[pos + 1] == 0
+
+
+def _write_classic(chain: _Chain) -> bytes:
+    out = bytearray(HEADER_SIZE)
+    struct.pack_into("<I", out, 0, VERSION_CLASSIC)
+    out[4:8] = CHAIN_MAGIC
+
+    setting_at: list[int] = []
+    path_at: dict[int, int] = {}
+    for setting in chain.settings:
+        setting_at.append(len(out))
+        out += setting.raw
+    for index, setting in enumerate(chain.settings):
+        if setting.path is None:
+            continue
+        if setting.path_offset not in path_at:
+            path_at[setting.path_offset] = len(out)
+            out += setting.path
+        struct.pack_into("<Q", out, setting_at[index], path_at[setting.path_offset])
+
+    _align(out, 16)
+    collision_at = len(out)
+    for collision in chain.collisions:
+        out += collision.raw
+    for index, collision in enumerate(chain.collisions):
+        if not collision.subs:
+            continue
+        _align(out, 16)
+        struct.pack_into("<Q", out, collision_at + index * _COLLISION_V21, len(out))
+        for sub in collision.subs:
+            out += sub
+        _align(out, 16)
+
+    _align(out, 16)
+    group_at = len(out)
+    for group in chain.groups:
+        out += group.raw
+
+    piece_name: list[int] = []
+    piece_node: list[int] = []
+    for piece in chain.pieces:
+        piece_name.append(len(out))
+        out += piece.name
+        _align(out, 16)
+        piece_node.append(len(out))
+        for node in piece.nodes:
+            out += node
+
+    if chain.wind:
+        wind_at = len(out)
+        out += chain.wind
+    else:
+        wind_at = 0
+    if chain.links:
+        _align(out, 16)
+        link_at = len(out)
+        shift = link_at - chain.classic_link_at
+        for index in range(len(chain.links) // _LINK_SIZE):
+            rec = bytearray(
+                chain.links[index * _LINK_SIZE:(index + 1) * _LINK_SIZE]
+            )
+            node_tbl = struct.unpack_from("<Q", rec, 0)[0]
+            if node_tbl:
+                struct.pack_into("<Q", rec, 0, node_tbl + shift)
+            out += rec
+        out += chain.link_tail
+    else:
+        link_at = 0
+
+    for group in chain.groups:
+        base = group_at + group.index * _GROUP_V21
+        slot = group.piece
+        struct.pack_into("<Q", out, base, piece_name[slot])
+        struct.pack_into("<Q", out, base + 8, piece_node[slot])
+
+    struct.pack_into("<Q", out, 0x18, collision_at if chain.collisions else group_at)
+    struct.pack_into("<Q", out, 0x28, group_at if chain.groups else 0)
+    struct.pack_into("<Q", out, 0x30, link_at)
+    if chain.settings:
+        struct.pack_into("<Q", out, 0x38, HEADER_SIZE)
+    if chain.wind:
+        struct.pack_into("<Q", out, 0x40, wind_at)
+    elif chain.links:
+        struct.pack_into("<Q", out, 0x40, link_at)
+    else:
+        struct.pack_into("<Q", out, 0x40, len(out))
+    out[0x48] = len(chain.groups)
+    out[0x49] = len(chain.settings)
+    out[0x4A] = len(chain.collisions)
+    out[0x4B] = len(chain.wind) // _WIND_SIZE if chain.wind else 0
+    out[0x4C] = len(chain.links) // _LINK_SIZE if chain.links else 0
+    return bytes(out)
+
+
+def _shrink_setting(raw: bytes) -> bytes:
+    out = bytearray(_SETTING_V21)
+    out[8:68] = raw[8:68]
+    out[68:72] = raw[88:92]
+    out[72:128] = raw[104:160]
+    return bytes(out)
+
+
+def _shrink_collision(raw: bytes) -> bytes:
+    out = bytearray(_COLLISION_V21)
+    out[8:32] = raw[8:32]
+    out[32:44] = raw[52:64]
+    out[48:52] = raw[72:76]
+    return bytes(out)
+
+
+def _shrink_sub(raw: bytes) -> bytes:
+    out = bytearray(_SUB_V21)
+    out[0:24] = raw[0:24]
+    out[24:28] = raw[40:44]
+    out[28:32] = raw[48:52]
+    return bytes(out)
+
+
+def _shrink_group(raw: bytes) -> bytes:
+    out = bytearray(_GROUP_V21)
+    out[16:48] = raw[16:48]
+    flags = struct.unpack_from("<I", out, 28)[0] & ~0x8000
+    struct.pack_into("<I", out, 28, flags)
+    return bytes(out)
+
+
+def _shrink_node(raw: bytes) -> bytes:
+    return bytes(raw[:_NODE_V21])
 
 
 def _align(buf: bytearray, boundary: int) -> None:

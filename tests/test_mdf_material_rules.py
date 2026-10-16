@@ -146,8 +146,57 @@ def test_re3_cloth_uses_the_jacket_shading_not_the_skin_values():
     skin_props = {p.propName: p.propValue for p in mdf.materialList[1].propertyList}
     assert cloth_props["Rec_Cloth"] == [1.0]
     assert cloth_props["Fresnel"] == [0.0]
+    assert cloth_props["Rec_Rain_WetRate"] == [0.0]
     assert skin_props["Rec_Cloth"] == [0.0]
     assert skin_props["Fresnel"] == [1.0]
+
+
+def test_authored_cloth_wetmask_survives_both_builds():
+    """RE3 cloth stores the wetmask under RainWet, not Rec_Rain.
+
+    Jacket shading must not put that rate back to zero. Classicize keeps
+    the same stock slots.
+    """
+    props = (
+        ("Rec_Cloth", [0.0]),
+        ("Fresnel", [1.0]),
+        ("RainWet_Intensity", [0.75]),
+        ("Rain_RainRate", [0.4]),
+    )
+    textures = (
+        ("RainRipples_AreaMap", "SectionRoot/Character/ripples.tex"),
+        ("Rain_WetMask", "SectionRoot/Character/pl1050_wetMask_MSK1.tex"),
+    )
+    cloth = make_material(
+        "pl2000_Body_Mat",
+        "MasterMaterial/Master/Record_Player_Cloth_RE3.mmtr",
+        props=props,
+        textures=textures,
+    )
+    mdf, _ = rtxify([cloth], ["record_player_cloth_re3.mmtr.1808160001"])
+    got = {p.propName: p.propValue for p in mdf.materialList[0].propertyList}
+    assert got["Rec_Cloth"] == [1.0]
+    _assert_wetmask(mdf.materialList[0])
+
+    down = FakeMDF([make_material(
+        "pl2000_Body_Mat",
+        "MasterMaterial/Master/Record_Player_Cloth_RE3.mmtr",
+        props=props,
+        textures=textures,
+    )])
+    mdf_classicize.classicize_mdf(
+        down, FakeMDFApi, ["record_player_cloth_re3.mmtr.2109101635"],
+    )
+    _assert_wetmask(down.materialList[0])
+
+
+def _assert_wetmask(mat):
+    props = {p.propName: p.propValue for p in mat.propertyList}
+    bound = {t.textureType: t.texturePath for t in mat.textureList}
+    assert props["Rec_Rain_WetRate"] == [0.75]
+    assert props["Rec_Rain_RainRate"] == [0.4]
+    assert bound["Rec_Rain_WetMask"].endswith("pl1050_wetMask_MSK1.tex")
+    assert bound["Rec_Rain_WaterRiple"].endswith("ripples.tex")
 
 
 def test_shipped_cloth_shader_is_rebuilt_without_moving_textures():

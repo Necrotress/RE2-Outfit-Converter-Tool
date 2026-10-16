@@ -1,6 +1,6 @@
 # RE2 Remake Outfit Converter
 
-**Version 1.3.1**
+**Version 1.3.2**
 
 A GUI tool (Windows exe + Linux package) that converts Resident Evil 2 Remake
 (Fluffy Mod Manager) Claire and Leon costume mods from one outfit slot to
@@ -32,11 +32,11 @@ or a Leon Police mod to Casual.
 
 ## Quick start (release builds)
 
-**Windows** — extract `RE2.Outfit.Converter.v1.3.1.Windows.zip`, run
+**Windows** — extract `RE2.Outfit.Converter.v1.3.2.Windows.zip`, run
 `RE2 Outfit Converter.exe` from the extracted folder (keep `_internal` next
 to the exe).
 
-**Linux** — extract `RE2.Outfit.Converter.v1.3.1.Linux.zip`, run `./run.sh`
+**Linux** — extract `RE2.Outfit.Converter.v1.3.2.Linux.zip`, run `./run.sh`
 (opens the same GUI; needs Python 3.10+, `python3-tk`, and a desktop session —
 see that package’s `README.txt`). Pack from source with `pack-linux.bat`.
 
@@ -228,12 +228,12 @@ pack-windows.bat
 ```
 
 Writes `release/RE2 Outfit Converter/` and
-`release/RE2.Outfit.Converter.v1.3.1.Windows.zip` (folder build: exe + `_internal`).
+`release/RE2.Outfit.Converter.v1.3.2.Windows.zip` (folder build: exe + `_internal`).
 
 ## Build the Linux package
 
 From the repo root on Windows, run `pack-linux.bat`. That stages the GUI
 scripts, `main.py`, `requirements-linux.txt`, and `re2_outfit_converter/`, then
-writes `release/RE2.Outfit.Converter.v1.3.1.Linux.zip`.
+writes `release/RE2.Outfit.Converter.v1.3.2.Linux.zip`.
 
 On Linux: extract, `chmod +x run.sh`, `./run.sh`.

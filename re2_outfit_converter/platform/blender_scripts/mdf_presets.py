@@ -465,6 +465,30 @@ def align_properties_to_preset(mat, classic_preset, rt_preset, file_re_mdf) -> i
     return added
 
 
+# Cloth and hair ports name rain slots without the Rec_ prefix. Record_Player
+# samples the Rec_ names, so a rebuild has to copy the authored slot across.
+_RAIN_TEXTURES = {
+    "RainRipples_AreaMap": "Rec_Rain_WaterRiple",
+    "Rain_WaterRiple": "Rec_Rain_WaterRiple",
+    "Rain_WetMask": "Rec_Rain_WetMask",
+}
+_RAIN_PROPS = {
+    "RainWet_Intensity": "Rec_Rain_WetRate",
+    "Rain_WetRate": "Rec_Rain_WetRate",
+    "Rain_RainRate": "Rec_Rain_RainRate",
+}
+
+
+def _copy_rain_alias(src: dict, mapping: dict) -> None:
+    for old, new in mapping.items():
+        if old not in src:
+            continue
+        value = src[old]
+        if value is None or value == "" or value == []:
+            continue
+        src[new] = value
+
+
 def prop_value_list(raw: Any) -> list[float]:
     if isinstance(raw, list):
         return [float(x) for x in raw]
@@ -491,6 +515,8 @@ def rebuild_from_preset(
     flags = preset["Flags"]
     src_tex = {t.textureType: t.texturePath for t in mat.textureList}
     src_prop = {p.propName: list(p.propValue) for p in mat.propertyList}
+    _copy_rain_alias(src_tex, _RAIN_TEXTURES)
+    _copy_rain_alias(src_prop, _RAIN_PROPS)
 
     new_mat = Material()
     new_mat.materialName = mat.materialName

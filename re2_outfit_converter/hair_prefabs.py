@@ -18,6 +18,7 @@ from .paths import (
     ensure_dir_ci,
     folder_has_mdf,
     mesh_roots,
+    natives_platform,
     parts_dir,
     resolve_ci,
 )
@@ -265,15 +266,31 @@ def write_hair_redirect_slots(
     ``pl`` + 4-char stems only).
     """
     profile = target.profile or CLAIRE_PROFILE
-    template = assets_dir() / "pl1000_hair_redirect_pl1070.pfb.16"
-    if not template.is_file():
-        return False
     hair_id = hair_id or profile.default_hair_id
     mesh_id = mesh_id or hair_id
     mdf_id = mdf_id or hair_id
     chain_id = chain_id or hair_id
     mesh_stem = mesh_stem or mesh_id
     mdf_stem = mdf_stem or mdf_id
+    # A jacket with no hair of its own hides Noir's hat by loading pak
+    # pl1070. Ray tracing ignores the classic .pfb.16, so the hide has to
+    # be the .pfb.17 twin. The bundled ponytail mesh stays out of pl1075.
+    use_rt_hide = (
+        natives_platform() == "stm"
+        and profile.player_root == "pl1000"
+        and hair_id == profile.default_hair_id
+        and mesh_id == hair_id
+        and mdf_id == hair_id
+        and chain_id == hair_id
+        and mesh_stem == mesh_id
+        and mdf_stem == mdf_id
+    )
+    if use_rt_hide:
+        template = assets_dir() / "rt_prefab" / "pl1000_hair_costume_8.pfb.17"
+    else:
+        template = assets_dir() / "pl1000_hair_redirect_pl1070.pfb.16"
+    if not template.is_file():
+        return False
     target_dir = ensure_dir_ci(staging, parts_dir(profile))
     data = template.read_bytes()
     # Claire template embeds pl1000 / pl1070 — retarget player root then hair.
@@ -309,10 +326,20 @@ def write_hair_redirect_slots(
             f"{hair_id}.chain",
             f"{chain_id}.chain",
         )
-    ext = hair_pfb_ext(analysis)
     root = profile.player_root
 
     for slot in (slots if slots is not None else list(target.all_slots)):
+        payload = data
+        ext = hair_pfb_ext(analysis)
+        if use_rt_hide:
+            if len(slot) != len("costume_8"):
+                report.warnings.append(
+                    f"Hair redirect slot {slot} does not match the "
+                    "ray-tracing hide template, so no .pfb.17 was written."
+                )
+                continue
+            payload = _patch_equal_token(data, "costume_8", slot)
+            ext = ".pfb.17"
         dest = target_dir / f"{root}_hair_{slot}{ext}"
         existing = list(target_dir.glob(f"{root}_hair_{slot}.pfb*"))
         if existing and not overwrite:
@@ -321,12 +348,150 @@ def write_hair_redirect_slots(
             for old in existing:
                 if old != dest:
                     old.unlink(missing_ok=True)
-        dest.write_bytes(data)
+        dest.write_bytes(payload)
         action = "replaced" if existing and overwrite else "injected"
         report.pfb_ops.append(
             f"{action} hair redirect  ->  {dest.name} ({note})"
         )
     return True
+
+
+def _prefab_loads_shipped_hair(
+    paths: list[Path], staging: Path, hair_id: str,
+) -> bool:
+    """True when the prefab already loads a mesh or mdf this mod shipped.
+
+    Noir and Military hide the pak hat. A private mesh such as ``pl1841``
+    is the converted hair, and replacing that prefab puts the ponytail back.
+    """
+    pak = hair_id.lower()
+    natives = staging / "natives"
+    if not natives.is_dir():
+        return False
+    shipped = {
+        path.name.lower().split(".", 1)[0]
+        for path in natives.rglob("*")
+        if path.is_file() and (
+            ".mesh." in path.name.lower() or ".mdf2." in path.name.lower()
+        )
+    }
+    for path in paths:
+        try:
+            data = path.read_bytes()
+        except OSError:
+            continue
+        for text in _utf16_texts(data):
+            low = text.replace("\\", "/").lower()
+            if "/player/" not in low or not low.endswith((".mesh", ".mdf2")):
+                continue
+            folder = low.rsplit("/", 2)[-2]
+            stem = low.rsplit("/", 1)[-1].split(".", 1)[0]
+            if folder == pak or stem == pak:
+                continue
+            if stem in shipped:
+                return True
+    return False
+
+
+def _utf16_texts(data: bytes) -> list[str]:
+    found: list[str] = []
+    index = 0
+    while index + 1 < len(data):
+        if data[index + 1] != 0 or not (32 <= data[index] < 127):
+            index += 1
+            continue
+        chars: list[str] = []
+        while (
+            index + 1 < len(data)
+            and data[index + 1] == 0
+            and 32 <= data[index] < 127
+        ):
+            chars.append(chr(data[index]))
+            index += 2
+        if len(chars) >= 4:
+            found.append("".join(chars))
+    return found
+
+
+def publish_rt_hair_hide(staging: Path, report: ConversionReport, target: Outfit, slot: str) -> None:
+    """Overwrite this slot's hair ``.pfb.17`` with the shared ponytail hide.
+
+    Ray tracing ignores a ``.pfb.16``. A copied source hair prefab, or the
+    pak file for Noir and Military, loads the hat mesh. A hat mesh with the
+    wrong chain freezes the outfit swap. The hide keeps ``pl1070.mesh`` and
+    ``pl1070.chain``. A hat mesh the mod actually shipped is left alone.
+    """
+    profile = target.profile or CLAIRE_PROFILE
+    if profile.player_root != "pl1000":
+        return
+    if target.hair_id not in ("pl1075", "pl1071"):
+        return
+    if _hair_mesh_present(staging, target.hair_id, profile):
+        return
+    natives = staging / "natives"
+    existing = [
+        path for path in natives.rglob(f"pl1000_hair_{slot}.pfb.17")
+        if path.is_file()
+    ] if natives.is_dir() else []
+    if _prefab_loads_shipped_hair(existing, staging, target.hair_id):
+        return
+    data = _rt_hair_hide_bytes(slot)
+    if data is None:
+        report.warnings.append(
+            f"pl1000_hair_{slot}.pfb.17: ray tracing hair template is missing "
+            "or the slot name does not fit it."
+        )
+        return
+    if existing:
+        for path in existing:
+            path.write_bytes(data)
+        dest_name = existing[0].name
+    else:
+        target_dir = ensure_dir_ci(staging, parts_dir(profile))
+        dest = target_dir / f"{profile.player_root}_hair_{slot}.pfb.17"
+        dest.write_bytes(data)
+        dest_name = dest.name
+    report.pfb_ops.append(
+        f"replaced hair redirect  ->  {dest_name} (hides {target.hair_id})"
+    )
+
+
+def _rt_hair_hide_bytes(slot: str) -> bytes | None:
+    folder = assets_dir() / "rt_prefab"
+    if slot == "default":
+        path = folder / "pl1000_hair_default.pfb.17"
+        if not path.is_file():
+            return None
+        return path.read_bytes()
+    path = folder / "pl1000_hair_costume_8.pfb.17"
+    if not path.is_file() or len(slot) != len("costume_8"):
+        return None
+    data = path.read_bytes()
+    if slot == "costume_8":
+        return data
+    old = "costume_8".encode("utf-16le")
+    if old not in data:
+        return None
+    return data.replace(old, slot.encode("utf-16le"))
+
+
+def _hair_mesh_present(
+    staging: Path,
+    hair_id: str,
+    profile: CharacterProfile,
+) -> bool:
+    for root in mesh_roots(profile):
+        folder = resolve_ci(staging, f"{root}/{hair_id}")
+        if folder is None:
+            continue
+        for path in folder.iterdir():
+            if (
+                path.is_file()
+                and ".mesh" in path.name.lower()
+                and "blend" not in path.name.lower()
+            ):
+                return True
+    return False
 
 
 def _hair_chain_present(

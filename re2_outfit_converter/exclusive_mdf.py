@@ -13,6 +13,7 @@ from .paths import (
     ensure_dir_ci,
     folder_has_mdf,
     mesh_roots,
+    natives_platform,
     resolve_ci,
 )
 from .reports import ConversionReport
@@ -57,6 +58,13 @@ def ensure_private_exclusive_mdf(
             staging, exclusive_id, hair_priv, rename_map, report,
             profile=profile)
         return True
+
+    if natives_platform() == "stm":
+        report.warnings.append(
+            f"Left exclusive {exclusive_id} material as shipped: staying on "
+            "ray tracing does not re-export materials."
+        )
+        return False
 
     template = bundled_exclusive_mdf(exclusive_id)
     if template is None:

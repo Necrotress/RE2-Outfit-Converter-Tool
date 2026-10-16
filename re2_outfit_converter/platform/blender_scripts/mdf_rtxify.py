@@ -35,6 +35,14 @@ SSS_MMTR = frozenset({
 # Classic expensive-transparent shader types → the RT value.
 SHADER_TYPE_TO_RT = {10: 13, 11: 13}
 
+# Jacket shading must not wipe a wetmask the material already authored.
+_AUTHORED_RAIN = frozenset({
+    "Rec_Rain_WetRate",
+    "Rec_Rain_RainRate",
+    "Rec_Rain_Scale",
+    "Rec_Rain_UseSecondaryUV",
+})
+
 # Shaders that declare more parameters in the RT build, and the preset pair
 # that spells out the difference. Record_Player goes from 34 to 37: the three
 # mdf_classicize.RT_ONLY_PROPS drops on the way back. Only shaders whose two
@@ -129,6 +137,8 @@ def _use_jacket_shading(mat) -> None:
         for p in preset["Property List"]
     }
     for prop in mat.propertyList:
+        if prop.propName in _AUTHORED_RAIN:
+            continue
         values = defaults.get(prop.propName)
         if values is not None and len(list(prop.propValue)) == len(values):
             prop.propValue = list(values)

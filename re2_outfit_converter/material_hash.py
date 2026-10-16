@@ -57,6 +57,43 @@ def is_material_name(token: str) -> bool:
     return bool(_MAT_NAME_RE.match(token))
 
 
+def _final_material_name(name: str, rename_map: dict[str, str]) -> str:
+    """Walk a promote-then-convert chain to the name left in the file."""
+    seen: set[str] = set()
+    current = name
+    while current in rename_map and current not in seen:
+        seen.add(current)
+        nxt = rename_map[current]
+        if not nxt or nxt == current:
+            break
+        current = nxt
+    return current
+
+
+def _collapsed_material_pairs(rename_map: dict[str, str]) -> list[tuple[str, str]]:
+    """Map each starting material name to its final name.
+
+    ``pl1001_Body_Mat`` → ``pl1000_Body_Mat`` → ``pl1004_Body_Mat`` leaves
+    the file on ``pl1004``. Replacing only the first hop looks for a name
+    that is already gone, and the deleted id's hash stays.
+    """
+    pairs: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for old in rename_map:
+        if old in seen or not is_material_name(old):
+            continue
+        final = _final_material_name(old, rename_map)
+        seen.add(old)
+        if (
+            not is_material_name(final)
+            or final == old
+            or len(old) != len(final)
+        ):
+            continue
+        pairs.append((old, final))
+    return pairs
+
+
 def patch_mdf_material_hashes(
     staging: Path,
     rename_map: dict[str, str],
@@ -69,10 +106,7 @@ def patch_mdf_material_hashes(
     a stale hash and the body fails to bind (invisible outfit). Rain/wet also
     depends on materials resolving correctly after a body-ID retarget.
     """
-    pairs = [
-        (old, new) for old, new in rename_map.items()
-        if is_material_name(old) and is_material_name(new) and len(old) == len(new)
-    ]
+    pairs = _collapsed_material_pairs(rename_map)
     if not pairs:
         return
 

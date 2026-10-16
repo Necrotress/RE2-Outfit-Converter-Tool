@@ -7,7 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from re2_outfit_converter.platform.chain_convert import convert_chain_to_rt
+from re2_outfit_converter.platform.chain_convert import (
+    convert_chain_from_rt,
+    convert_chain_to_rt,
+)
 from re2_outfit_converter.platform.converter import _convert_textures_and_unsupported
 from re2_outfit_converter.platform.reports import ConversionReport, FormatConversionError
 
@@ -84,6 +87,32 @@ def test_upgrade_renames_the_chain_file(tmp_path: Path):
     assert (natives / "note.chain.21").read_bytes() == b"not-a-chain"
     assert any(op.startswith("chain:") for op in report.converted_ops)
     assert any(op.startswith("chain:") for op in report.passthrough_ops)
+
+
+def test_upgraded_chain_downgrades_back_to_chain_21():
+    classic = _minimal_chain()
+    upgraded = convert_chain_to_rt(classic)
+    restored = convert_chain_from_rt(upgraded)
+    assert struct.unpack_from("<I", restored, 0)[0] == 21
+    assert restored[4:8] == b"chan"
+    assert "a".encode("utf-16le") + b"\x00\x00" in restored
+    assert convert_chain_to_rt(restored) == upgraded
+
+
+def test_downgrade_renames_the_chain_file(tmp_path: Path):
+    natives = tmp_path / "natives" / "stm"
+    natives.mkdir(parents=True)
+    (natives / "pl1004.chain.46").write_bytes(convert_chain_to_rt(_minimal_chain()))
+    (natives / "note.chain.46").write_bytes(b"not-a-chain")
+    report = ConversionReport()
+    _convert_textures_and_unsupported(
+        tmp_path, report, lambda _msg: None, to_rt=False,
+    )
+    restored = natives / "pl1004.chain.21"
+    assert restored.is_file()
+    assert not (natives / "pl1004.chain.46").exists()
+    assert struct.unpack_from("<I", restored.read_bytes(), 0)[0] == 21
+    assert (natives / "note.chain.46").read_bytes() == b"not-a-chain"
 
 
 def test_garbage_is_rejected():

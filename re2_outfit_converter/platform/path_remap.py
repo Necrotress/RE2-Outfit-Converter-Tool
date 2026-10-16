@@ -57,6 +57,45 @@ def move_tree_to_classic(staging: Path, report: ConversionReport) -> None:
     )
 
 
+def lowercase_stm_tree(staging: Path) -> int:
+    """Rename every path component under ``natives/stm`` to lowercase.
+
+    Fluffy invalidates the pak entry with the lowercase path from the game
+    list, then copies the loose file with the archive's own spelling.
+    ``natives/STM`` does not satisfy a ``natives/stm`` lookup, so the pak
+    prefab stays and the body never draws. A case-only rename has to hop
+    through a temporary name or Windows leaves the old spelling in place.
+    """
+    natives = staging / "natives"
+    if not natives.is_dir():
+        return 0
+    stm = next(
+        (
+            child for child in natives.iterdir()
+            if child.is_dir() and child.name.lower() == PLATFORM_RT
+        ),
+        None,
+    )
+    if stm is None:
+        return 0
+    count = 0
+    entries = sorted(stm.rglob("*"), key=lambda path: len(path.parts), reverse=True)
+    for path in entries:
+        count += _rename_case_lower(path)
+    count += _rename_case_lower(stm)
+    return count
+
+
+def _rename_case_lower(path: Path) -> int:
+    lower = path.name.lower()
+    if path.name == lower or not path.exists():
+        return 0
+    temporary = path.with_name(f"{path.name}.~case")
+    path.rename(temporary)
+    temporary.rename(path.with_name(lower))
+    return 1
+
+
 def _move_platform_tree(
     staging: Path,
     report: ConversionReport,

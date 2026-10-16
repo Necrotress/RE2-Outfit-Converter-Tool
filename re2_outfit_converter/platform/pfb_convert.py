@@ -1,4 +1,4 @@
-"""RT pfb.17 → classic pfb.16 (and chain.46 → chain.21 stub).
+"""RT pfb.17 → classic pfb.16. Chain downgrade lives in chain_convert.
 
 Paired Schoolgirl prefabs differ in size and internal layout, not only paths.
 """
@@ -26,7 +26,6 @@ def convert_pfb(data: bytes) -> bytes:
 
 
 def convert_chain(data: bytes) -> bytes:
-    raise FormatConversionError(
-        "chain.46 -> chain.21 binary downgrade is not supported. "
-        "Re-export with RE Mesh Editor or use a dual-pack classic tree."
-    )
+    from .chain_convert import convert_chain_from_rt
+
+    return convert_chain_from_rt(data)

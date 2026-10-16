@@ -197,6 +197,32 @@ def test_material_name_hash_known_value():
     assert material_name_hash("pl1006_Body_Mat") == 0xE36A92E1
 
 
+def test_two_hop_rename_patches_the_final_material_hash(tmp_path: Path):
+    """Promote then convert leaves the last name and the first id's hash."""
+    staging = tmp_path / "natives" / "x64"
+    staging.mkdir(parents=True)
+    cases = (
+        ("pl1001_Body_Mat", "pl1000_Body_Mat", "pl1004_Body_Mat"),
+        ("pl0001_Body_Mat", "pl0000_Body_Mat", "pl0004_Body_Mat"),
+    )
+    for start, mid, final in cases:
+        folder = staging / final[:6]
+        folder.mkdir()
+        (folder / f"{final[:6]}.mdf2.21").write_bytes(
+            struct.pack("<I", material_name_hash(start))
+            + _u16(final)
+            + b"\x00\x00"
+        )
+        patch_mdf_material_hashes(
+            tmp_path,
+            {start: mid, mid: final},
+            ConversionReport(),
+        )
+        data = (folder / f"{final[:6]}.mdf2.21").read_bytes()
+        assert struct.pack("<I", material_name_hash(final)) in data, final
+        assert struct.pack("<I", material_name_hash(start)) not in data, final
+
+
 def test_shared_texture_aliases_patch_addon_mdf_without_textures_folder(
     tmp_path: Path,
 ):
@@ -249,7 +275,10 @@ def test_body_folder_prefix_patches_mdf_only_addon(tmp_path: Path):
     body = root / "pl1005"
     body.mkdir(parents=True)
     tex = "SectionRoot/Character/Player/pl1000/pl1005/props_1.tex"
-    (body / "pl1005.mdf2.10").write_bytes(_u16(tex) + b"\x00\x00")
+    detail = "SectionRoot/Character/Player/pl1000/pl1005/Leather_Detail_NRM.tex"
+    (body / "pl1005.mdf2.10").write_bytes(
+        _u16(tex) + b"\x00\x00" + _u16(detail) + b"\x00\x00"
+    )
 
     rename_map: dict[str, str] = {}
     report = ConversionReport()
@@ -257,14 +286,14 @@ def test_body_folder_prefix_patches_mdf_only_addon(tmp_path: Path):
         root, staging, "pl1005", "pl1006", rename_map, report,
         register_dir_prefix=True,
     )
-    assert rename_map.get(
-        "sectionroot/character/player/pl1000/pl1005"
-    ) == "sectionroot/character/player/pl1000/pl1006"
+    assert "sectionroot/character/player/pl1000/pl1005" not in rename_map
 
     patch_binaries(staging, rename_map, report)
     data = next(staging.rglob("pl1006.mdf2*")).read_bytes()
     assert _u16("pl1006/props_1.tex") in data
     assert _u16("pl1005/props_1.tex") not in data
+    assert _u16("pl1005/Leather_Detail_NRM.tex") in data
+    assert _u16("pl1006/Leather_Detail_NRM.tex") not in data
 
 
 def test_shared_face_mesh_is_isolated_off_pl1050(tmp_path: Path):
